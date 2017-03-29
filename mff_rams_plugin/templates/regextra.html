@@ -13,6 +13,27 @@
             </div>
         </div>
     {% endif %}
+
+
+    <script type="text/javascript">
+        $(function () {
+            var showOrHideCompedReason = function() {
+                setVisible('#comped_reason', $('select[name="paid"] option:selected').val() == '{{ c.NEED_NOT_PAY }}');
+            };
+
+            $.field('comped_reason').parents('.form-group').insertAfter($.field('paid').parents('.form-group'));
+            $.field('paid').change(showOrHideCompedReason);
+
+            showOrHideCompedReason();
+        });
+    </script>
+
+    <div id="comped_reason" class="form-group">
+        <label for="comped_reason" class="col-sm-2 control-label">Reason for Comped Badge</label>
+        <div class="col-sm-6">
+            <input type="text" class="form-control" name="comped_reason" value="{{ attendee.comped_reason }}" placeholder="Enter your reason for giving this attendee a comped badge." />
+        </div>
+    </div>
 {% endif %}
 
 <script type="text/javascript">
