@@ -1,0 +1,35 @@
+{% if c.PAGE_PATH == '/registration/form' %}
+    {% if attendee.times_printed < 1 or attendee.print_pending %}
+        <script type="text/javascript">
+            $(function () {
+                $('#print_pending').insertAfter($.field('badge_status').parents('.form-group'));
+            });
+        </script>
+
+        <div id="print_pending" class="form-group">
+            <label for="print_pending" class="col-sm-2 control-label">Ready to Print</label>
+            <div class="col-sm-6">
+                {{ macros.checkbox(attendee, 'print_pending') }}
+            </div>
+        </div>
+    {% endif %}
+{% endif %}
+
+<script type="text/javascript">
+    $(function() {
+        // Append to the setBadge function to show the shirt row if Sponsor or Shiny Sponsor is selected
+        if (window.BADGE_TYPES) {
+            var origSetBadge = setBadge;
+            setBadge = function(types, index) {
+                origSetBadge(types, index);
+                setVisible('.shirt-row', $.val('badge_type') != {{ c.ATTENDEE_BADGE }});
+            }
+        }
+
+        // Also set visibility when the page loads
+        setVisible('.shirt-row', $.val('badge_type') != {{ c.ATTENDEE_BADGE }});
+    });
+
+    // We don't use amount_extra so we don't want this to do anything
+    donationChanged = function() {}
+</script>
