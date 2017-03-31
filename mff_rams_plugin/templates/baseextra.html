@@ -1,0 +1,25 @@
+{% if c.HAS_PEOPLE_ACCESS %}
+<script type="text/javascript">
+
+</script>
+{% endif %}
+
+{% if c.PAGE_PATH == '/registration/form' %}
+    <script type="text/javascript">
+        $(function () {
+            $('#reprint_fee').insertAfter($.field('badge_status').parents('.form-group'));
+        });
+    </script>
+
+    <div id="reprint_fee" class="form-group">
+    {% include "kiosk_printing/reprint_fee.html" %}
+    </div>
+{% endif %}
+
+<script type="text/javascript">
+    $(function() {
+        if ($("form[action*='delete']")) {
+                $("form[action*='delete']").remove();
+            }
+    });
+</script>

@@ -52,5 +52,10 @@
     });
 
     // We don't use amount_extra so we don't want this to do anything
-    donationChanged = function() {}
+    donationChanged = function() {};
+
+    // We don't want attendees to be able to invalidate themselves
+    if ($("[form='invalidate']").length) {
+        $("[form='invalidate']").remove()
+    }
 </script>
