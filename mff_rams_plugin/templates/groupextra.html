@@ -1,0 +1,17 @@
+<script type="text/javascript">
+    $(function () {
+        // Position new field(s)
+        if ($('#power').length) {
+            $('#power').parents('.form-group').insertAfter($.field('tables').parents('.form-group'))
+        }
+    });
+</script>
+
+{% if attende and attendee.is_dealer or group and group.is_dealer or new_dealer %}
+<div class="form-group">
+    <label for="power" class="col-sm-2 control-label">Do you need power?</label>
+    <div class="col-sm-6">
+        <input type="checkbox" name="power" id="power" value="1" {% if group.power %}checked="checked"{% endif %} /> Yes (${{ c.POWER_PRICE }})
+    </div>
+</div>
+{% endif %}
