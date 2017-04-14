@@ -44,3 +44,11 @@ class Attendee:
             return max(0, c.get_attendee_price(registered) + self.age_discount)
         else:
             return c.get_attendee_price(registered)
+
+    @property
+    def amount_unpaid(self):
+        if self.paid == c.PAID_BY_GROUP:
+            personal_cost = max(0, self.total_cost - c.BADGE_PRICE)
+        else:
+            personal_cost = self.total_cost
+        return max(0, personal_cost - self.amount_paid)
