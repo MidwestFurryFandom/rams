@@ -26,3 +26,21 @@ class Group:
 @Session.model_mixin
 class Attendee:
     comped_reason = Column(UnicodeText, default='', admin_only=True)
+
+    @cost_property
+    def badge_cost(self):
+        registered = self.registered_local if self.registered else None
+        if self.paid == c.NEED_NOT_PAY:
+            return 0
+        elif self.overridden_price is not None:
+            return self.overridden_price
+        elif self.badge_type == c.ONE_DAY_BADGE:
+            return c.get_oneday_price(registered)
+        elif self.is_presold_oneday:
+            return c.get_presold_oneday_price(self.badge_type)
+        if self.badge_type in c.BADGE_TYPE_PRICES:
+            return int(c.BADGE_TYPE_PRICES[self.badge_type])
+        elif self.age_discount != 0:
+            return max(0, c.get_attendee_price(registered) + self.age_discount)
+        else:
+            return c.get_attendee_price(registered)
