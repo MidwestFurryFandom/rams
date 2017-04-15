@@ -1,8 +1,4 @@
-{% if c.HAS_PEOPLE_ACCESS %}
-<script type="text/javascript">
 
-</script>
-{% endif %}
 
 {% if c.PAGE_PATH == '/registration/form' %}
     <script type="text/javascript">
@@ -21,5 +17,10 @@
         if ($("form[action*='delete']")) {
                 $("form[action*='delete']").remove();
             }
+
+        $("input").each(function() {
+            $(this).prop('pattern','[^\u{1F600}-\u{1F6FF}]*').prop('title','No fields may contain emoji characters.')
+        });
+
     });
 </script>
