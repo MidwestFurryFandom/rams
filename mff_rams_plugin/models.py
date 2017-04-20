@@ -3,6 +3,7 @@ from . import *
 @Session.model_mixin
 class Group:
     power = Column(Integer, default=0)
+    location = Column(UnicodeText, default='', admin_only=True)
 
     @cost_property
     def power_cost(self):
