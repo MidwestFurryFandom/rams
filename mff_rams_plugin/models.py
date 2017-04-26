@@ -31,8 +31,10 @@ class Attendee:
     @cost_property
     def badge_cost(self):
         registered = self.registered_local if self.registered else None
-        if self.paid == c.NEED_NOT_PAY:
+        if self.paid == c.NEED_NOT_PAY and self.badge_type not in [c.SPONSOR_BADGE, c.SHINY_BADGE]:
             return 0
+        elif self.paid == c.NEED_NOT_PAY:
+            return c.BADGE_TYPE_PRICES[self.badge_type] - c.get_attendee_price(registered)
         elif self.overridden_price is not None:
             return self.overridden_price
         elif self.badge_type == c.ONE_DAY_BADGE:
