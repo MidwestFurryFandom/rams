@@ -28,6 +28,10 @@ class Group:
 class Attendee:
     comped_reason = Column(UnicodeText, default='', admin_only=True)
 
+    @presave_adjustment
+    def never_spam(self):
+        attendee.can_spam = False
+
     @cost_property
     def badge_cost(self):
         registered = self.registered_local if self.registered else None
