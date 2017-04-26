@@ -23,6 +23,7 @@
 
             $.field('comped_reason').parents('.form-group').insertAfter($.field('paid').parents('.form-group'));
             $.field('paid').change(showOrHideCompedReason);
+            $.field('placeholder').click(showOrHideCompedReason);
 
             showOrHideCompedReason();
         });
