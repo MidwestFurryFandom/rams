@@ -30,7 +30,7 @@ class Attendee:
 
     @presave_adjustment
     def never_spam(self):
-        attendee.can_spam = False
+        self.can_spam = False
 
     @cost_property
     def badge_cost(self):
