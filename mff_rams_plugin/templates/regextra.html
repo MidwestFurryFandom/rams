@@ -56,9 +56,8 @@
 
         // Also set visibility when the page loads
         setVisible('.shirt-row', $.val('badge_type') == {{ c.SPONSOR_BADGE }} || $.val('badge_type') ==  {{ c.SHINY_BADGE }});
-        {% if attendee.badge_type in c.PREASSIGNED_BADGE_TYPES %}
-            setVisible('.badge-row', true);
-        {% endif %}
+        setVisible('.badge-row', true);
+
 
         // Hide all the things
         $.field('found_how').parents('.form-group').hide();
