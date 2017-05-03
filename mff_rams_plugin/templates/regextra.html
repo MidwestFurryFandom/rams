@@ -64,6 +64,9 @@
         $.field('found_how').parents('.form-group').hide();
         $.field('comments').parents('.form-group').hide();
         $.field('can_spam').parents('.form-group').hide();
+         
+        // Increase maximum length of badge_printed_name
+        $.field('badge_printed_name').prop('maxlength', 30);
     });
 
     // We don't use amount_extra so we don't want this to do anything
