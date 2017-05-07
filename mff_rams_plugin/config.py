@@ -15,8 +15,8 @@ class ExtraConfig:
 
     @property
     def ADMIN_TABLE_OPTS(self):
-      return [(0.0, 'No Table')] + TABLE_OPTS()
+      return [(0.0, 'No Table')] + c.TABLE_OPTS
    
     @property
     def PREREG_TABLE_OPTS(self):
-      return [(count, '{}: ${}'.format(desc, TABLE_PRICES()[count])) for count, desc in TABLE_OPTS()]
+      return [(count, '{}: ${}'.format(desc, c.TABLE_PRICES[count])) for count, desc in c.TABLE_OPTS]
