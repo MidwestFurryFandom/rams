@@ -64,8 +64,9 @@
         $.field('comments').parents('.form-group').hide();
         $.field('can_spam').parents('.form-group').hide();
          
-        // Increase maximum length of badge_printed_name
+        // Increase maximum length of badge_printed_name and make it bold
         $.field('badge_printed_name').prop('maxlength', 30);
+        $("label[for='badge_printed_name']").removeClass('optional-field');
     });
 
     // We don't use amount_extra so we don't want this to do anything

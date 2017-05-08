@@ -13,9 +13,9 @@
 
 {% if attendee and attendee.is_dealer or group and group.is_dealer or new_dealer %}
 <div class="form-group">
-    <label for="power" class="col-sm-2 control-label">Do you need power?</label>
-    <div class="col-sm-6">
-        <input type="checkbox" name="power" id="power" value="1" {% if group.power %}checked="checked"{% endif %} /> Yes (${{ c.POWER_PRICE }})
+    <div class="col-sm-6 col-sm-offset-2">
+        <input type="checkbox" name="power" id="power" value="1" {% if group.power %}checked="checked"{% endif %} />
+        <label for="power" class="optional-field">I need power at my table. (${{ c.POWER_PRICE }})</label>
     </div>
 </div>
 {% endif %}
