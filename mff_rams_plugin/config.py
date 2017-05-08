@@ -11,7 +11,7 @@ class ExtraConfig:
 
     @property
     def TABLE_OPTS(self):
-      return [ (1.0, 'Single Table'),(2.0, 'Double Table'),(3.0, 'Triple Table'),(4.0, 'Quad Table'),(5.0, '10x10 Booth')]
+      return [ (1, 'Single Table'),(2, 'Double Table'),(3, 'Triple Table'),(4, 'Quad Table'),(5, '10x10 Booth')]
 
     @property
     def ADMIN_TABLE_OPTS(self):
