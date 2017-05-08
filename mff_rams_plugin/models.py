@@ -11,7 +11,7 @@ class Group:
 
     @cost_property
     def table_cost(self):
-        return c.TABLE_PRICES[self.tables]
+        return c.TABLE_PRICES[int(self.tables)]
 
     @property
     def dealer_badges_remaining(self):
