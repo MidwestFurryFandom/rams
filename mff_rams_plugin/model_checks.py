@@ -19,3 +19,12 @@ def no_emojis(model):
 def badge_printed_name(attendee):
     if not attendee.badge_printed_name:
         return 'Please enter a name for your custom-printed badge.'
+
+@prereg_validation.Group
+def dealer_wares(group):
+    pass
+
+@prereg_validation.Group
+def dealer_description(group):
+    if group.tables and not group.description:
+        return 'Please provide a description for us to evaluate your submission and use in listings.'

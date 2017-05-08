@@ -4,10 +4,17 @@
         if ($('#power').length) {
             $('#power').parents('.form-group').insertBefore($.field('wares').parents('.form-group'))
         }
-        //Hide reference to requesting more than four tables
+        // Hide reference to requesting more than four tables and list of prices.
         $("#moretables").hide();
-        //Boy howdy was this ever wrong. Dropdown does a better job for us now
         $("#table_prices").hide();
+
+        // Hides "wares" box because we are not using it
+        $.field('wares').parents('.form-group').hide();
+        $('p:contains("Please be detailed; include a link to view your wares if possible.")').hide();
+
+        // Rename Description box and help text
+        $('label:contains("Description")').text('Merchandise Description');
+        $('p:contains("Please keep to one sentence.")').text('This will be used both for dealer selection (if necessary) and in all dealer listings.')
     });
 </script>
 
