@@ -9,6 +9,10 @@ class Group:
     def power_cost(self):
         return c.POWER_PRICE * self.power
 
+    @cost_property
+    def table_cost(self):
+        return c.TABLE_PRICES[self.tables]
+
     @property
     def dealer_badges_remaining(self):
         """
