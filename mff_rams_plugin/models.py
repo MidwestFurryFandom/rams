@@ -6,6 +6,7 @@ class Group:
     power_fee = Column(Integer, default=0)
     power_usage = Column(UnicodeText)
     location = Column(UnicodeText, default='', admin_only=True)
+    table_fee = Column(Integer, default=0)
 
     @cost_property
     def power_cost(self):
@@ -13,7 +14,7 @@ class Group:
 
     @cost_property
     def table_cost(self):
-        return c.TABLE_PRICES[int(self.tables)]
+        return self.table_fee if self.table_fee else c.TABLE_PRICES[int(self.tables)]
 
     @property
     def dealer_badges_remaining(self):
