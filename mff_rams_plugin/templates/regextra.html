@@ -45,27 +45,27 @@
             setBadge = function(types, index) {
                 origSetBadge(types, index);
                 setVisible('.shirt-row', $.val('badge_type') == {{ c.SPONSOR_BADGE }} || $.val('badge_type') ==  {{ c.SHINY_BADGE }});
-            }
+            };
 
             // Add a link explaining the different levels
             var levels = '<p class="help-block">'+
             '<span class="popup"><a href="https://www.furfest.org/registration" target="_blank">What are these?</a></span>'+
-            '</p>'
-            $("label:contains('Badge Level')").append(levels)
+            '</p>';
+            $("label:contains('Badge Level')").append(levels);
         }
 
         // Also set visibility when the page loads
         setVisible('.shirt-row', $.val('badge_type') == {{ c.SPONSOR_BADGE }} || $.val('badge_type') ==  {{ c.SHINY_BADGE }});
         setVisible('.badge-row', true);
 
-
         // Hide all the things
         $.field('found_how').parents('.form-group').hide();
         $.field('comments').parents('.form-group').hide();
         $.field('can_spam').parents('.form-group').hide();
          
-        // Increase maximum length of badge_printed_name
+        // Increase maximum length of badge_printed_name and make it bold
         $.field('badge_printed_name').prop('maxlength', 30);
+        $("label[for='badge_printed_name']").removeClass('optional-field');
     });
 
     // We don't use amount_extra so we don't want this to do anything

@@ -4,18 +4,30 @@
         if ($('#power').length) {
             $('#power').parents('.form-group').insertBefore($.field('wares').parents('.form-group'))
         }
-        //Hide reference to requesting more than four tables
-        $("#moretables").hide();
-        //Boy howdy was this ever wrong. Dropdown does a better job for us now
-        $("#table_prices").hide();
+
+        if ($("#moretables").length) {
+            // Hide reference to requesting more than four tables and list of prices.
+            $("#moretables").hide();
+            $("#table_prices").hide();
+        }
+
+        if ($.field('wares')) {
+            // Hides "wares" box because we are not using it
+            $.field('wares').parents('.form-group').hide();
+            $('p:contains("Please be detailed; include a link to view your wares if possible.")').hide();
+
+            // Rename Description box and help text
+            $('label:contains("Description")').text('Merchandise Description');
+            $('p:contains("Please keep to one sentence.")').text('This will be used both for dealer selection (if necessary) and in all dealer listings.')
+        }
     });
 </script>
 
 {% if attendee and attendee.is_dealer or group and group.is_dealer or new_dealer %}
 <div class="form-group">
-    <label for="power" class="col-sm-2 control-label">Do you need power?</label>
-    <div class="col-sm-6">
-        <input type="checkbox" name="power" id="power" value="1" {% if group.power %}checked="checked"{% endif %} /> Yes (${{ c.POWER_PRICE }})
+    <div class="col-sm-6 col-sm-offset-2">
+        <input type="checkbox" name="power" id="power" value="1" {% if group.power %}checked="checked"{% endif %} />
+        <label for="power" class="optional-field">I need power at my table. (${{ c.POWER_PRICE }})</label>
     </div>
 </div>
 {% endif %}
