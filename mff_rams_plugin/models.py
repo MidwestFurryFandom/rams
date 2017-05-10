@@ -3,11 +3,13 @@ from . import *
 @Session.model_mixin
 class Group:
     power = Column(Integer, default=0)
+    power_fee = Column(Integer, default=0)
+    power_usage = Column(UnicodeText)
     location = Column(UnicodeText, default='', admin_only=True)
 
     @cost_property
     def power_cost(self):
-        return c.POWER_PRICE * self.power
+        return self.power_fee if self.power_fee else c.POWER_PRICES[int(self.power)]
 
     @cost_property
     def table_cost(self):

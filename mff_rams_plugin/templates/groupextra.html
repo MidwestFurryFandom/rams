@@ -1,8 +1,20 @@
 <script type="text/javascript">
     $(function () {
         // Position new field(s)
-        if ($('#power').length) {
-            $('#power').parents('.form-group').insertBefore($.field('wares').parents('.form-group'))
+        if ($('#power-fields').length) {
+            var powerOpt = function() {
+                if ($('#power').is(':checked')) {
+                    $('#power_usage').parents('.form-group').show();
+                } else if ($('#power :selected').length && $('#power').val() != 0) {
+                    $('#power_usage').parents('.form-group').show();
+                } else {
+                    $('#power_usage').parents('.form-group').hide();
+                }
+            };
+
+            $('#power-fields').insertBefore($.field('description').parents('.form-group'));
+            $('#power').on('click', powerOpt);
+            powerOpt();
         }
 
         if ($("#moretables").length) {
@@ -23,12 +35,31 @@
     });
 </script>
 
-{% if attendee and attendee.is_dealer or group and group.is_dealer or new_dealer %}
+{% if group and group.is_dealer or new_dealer or attendee and attendee.badge_type == c.PSEUDO_DEALER_BADGE %}
+<div id="power-fields">
 <div class="form-group">
     <div class="col-sm-6 col-sm-offset-2">
-        <input type="checkbox" name="power" id="power" value="1" {% if group.power %}checked="checked"{% endif %} />
+        {% if c.PAGE_PATH == '/groups/form' %}
+        <select name="power" id="power">
+            {{ options(c.DEALER_POWER_OPTS, group.power) }}
+        </select>
+        {% else %}
+        <input type="checkbox" name="power" id="power" value="1" {% if group.power %}checked="checked"{% endif %} {% if group and not group.is_new and not c.PAGE_PATH == '/groups/form' %}disabled="disabled"{% endif %} />
         <label for="power" class="optional-field">I need power at my table. (${{ c.POWER_PRICE }})</label>
+        {% endif %}
     </div>
+</div>
+<div class="form-group">
+    <label for="power_usage" class="col-sm-2 control-label">Power Usage</label>
+    <div class="col-sm-6">
+        <textarea class="form-control" name="power_usage" id="power_usage" placeholder="Please provide a listing of what devices you will be using." rows="4">{{ group.power_usage }}</textarea>
+    </div>
+</div>
+{% if not c.PAGE_PATH == '/groups/form' and (group and group.power or attendee and attendee.badge_type == c.PSEUDO_DEALER_BADGE) %}
+<div class="form-group">
+    <p class="help-block col-sm-6 col-sm-offset-2"><i>If you expect to use more than 400 watts of power, be aware that you may be charged more for electrical access (See Dealer Instructions for more information).</i></p>
+</div>
+{% endif %}
 </div>
 {% endif %}
 

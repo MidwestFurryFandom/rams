@@ -28,3 +28,8 @@ def dealer_wares(group):
 def dealer_description(group):
     if group.tables and not group.description:
         return 'Please provide a description for us to evaluate your submission and use in listings.'
+
+@prereg_validation.Group
+def power_usage(group):
+    if group.power and not group.power_usage:
+        return 'Please provide a list of what powered devices you expect to use.'
