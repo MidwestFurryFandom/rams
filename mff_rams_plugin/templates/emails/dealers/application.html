@@ -2,7 +2,7 @@
 <head></head>
 <body>
 
-Your group ({{ group.name }}) has successfully submitted a Dealer application for {{ c.EVENT_NAME }}
+({{ group.name }}) has successfully submitted a Dealer application for {{ c.EVENT_NAME }}
 this coming {{ event_dates() }}. Below is a copy of your application. You may
 <a href="{{ c.URL_BASE }}/preregistration/group_members?id={{ group.id }}">update it here</a> or
 <a href="{{ c.URL_BASE }}/preregistration/confirm?id={{ group.leader.id }}">view your badge here</a>.
@@ -10,6 +10,9 @@ this coming {{ event_dates() }}. Below is a copy of your application. You may
     <li><strong>Dealer Table Name</strong>: {{ group.name }}</li>
     <li><strong>Tables</strong>: {{ group.tables }} table{{ group.tables|pluralize }} (${{ group.table_cost|round(2) }}) </li>
     <li><strong>Badges</strong>: {{ group.badges }} badge{{ group.badges|pluralize }} (${{ group.badge_cost|round(2) }}) </li>
+    {% if group.power %}
+    <li><strong>Power Cost</strong>: ${{ group.power_cost() }}
+    {% endif %}
     <li><strong>Total Price</strong> ${{ group.cost }}</li>
     <li><strong>Description</strong>: {{ group.description }}</li>
     {% if group.special_needs %}<li><strong>Table Requests and Special Requests</strong>: {{ group.special_needs }}</li>{% endif %}
@@ -18,13 +21,10 @@ this coming {{ event_dates() }}. Below is a copy of your application. You may
 </ul>
 
 {% if c.AFTER_DEALER_REG_DEADLINE %}
-    Because our marketplace is currently full, your submission has been automatically placed on our waitlist.  We'll let you know if your application is later approved.
+    Because our dealers room is currently full, your submission has been automatically placed on our waitlist.  We'll let you know if your application is later approved.
 {% else %}
-    We will review your request and provide you with a payment link once your application has been approved.
+  Your application will be reviewed and you should receive a decision within the next two to three weeks. If your application is approved you will receive an email with a payment link and further information on Dealers Den policies. 
 {% endif %}
-
-<br/> <br/> <u>Dealer Rules and Information</u>
-{% include "static_views/dealerRules.html" %}
 
 </body>
 </html>
