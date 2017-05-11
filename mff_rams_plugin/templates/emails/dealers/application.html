@@ -11,7 +11,7 @@ this coming {{ event_dates() }}. Below is a copy of your application. You may
     <li><strong>Tables</strong>: {{ group.tables }} table{{ group.tables|pluralize }} (${{ group.table_cost|round(2) }}) </li>
     <li><strong>Badges</strong>: {{ group.badges }} badge{{ group.badges|pluralize }} (${{ group.badge_cost|round(2) }}) </li>
     {% if group.power %}
-    <li><strong>Power Cost</strong>: ${{ group.power_cost() }}
+    <li><strong>Power Cost</strong>: ${{ group.power_cost }}
     {% endif %}
     <li><strong>Total Price</strong> ${{ group.cost }}</li>
     <li><strong>Description</strong>: {{ group.description }}</li>
