@@ -66,6 +66,7 @@
         // Increase maximum length of badge_printed_name and make it bold
         $.field('badge_printed_name').prop('maxlength', 30);
         $("label[for='badge_printed_name']").removeClass('optional-field');
+        $('p:contains("Badge names have a maximum of 20 characters.")').text("Badge names have a maximum of 30 characters.")
     });
 
     // We don't use amount_extra so we don't want this to do anything
