@@ -1,0 +1,29 @@
+<html>
+<head></head>
+<body>
+
+You ({{ attendee.full_name }}) have preregistered for {{ c.EVENT_NAME }} at the {{attendee.badge_type}} level
+{% if attendee.group %}
+    by claiming one of the badges in the {{ attendee.group.name }} group.
+{% else %}
+    and your payment of ${{ attendee.amount_paid }} has been received.  
+{% endif %}
+<br><br>
+Your registration confirmation number is {{ attendee.id }}. You can update your contact information, change your badge name, or upgrade you registration level by clicking <a href="{{ c.URL_BASE }}/preregistration/confirm?id={{ attendee.id }}">here</a>.
+<br/> <br/>
+
+Badges are not mailed out before the event, so your badge will be available for pickup at registration when you arrive at {{ c.EVENT_NAME }}.  Simply bring a photo ID to registration, where you can pick up your badge. Location and hours of registration will be announced at a later date on our website and social media.
+
+
+{% include "emails/reg_workflow/reg_notes.html" %}
+
+Your registration may be cancelled and refunded until preregistration closes on Friday, November 17, 2017. Please email registration@furfest.org to request a cancellation and refund.
+<br><br>
+If you have any other questions about your registration, please email us at registration@furfest.org. Thank you for again registering for Midwest FurFest and we’ll see you at the con.
+<br><br>
+Midwest FurFest Regsitration Team<br>
+registraton@furfest.org<br>
+http://furfest.org<br>
+</body>
+
+</html>

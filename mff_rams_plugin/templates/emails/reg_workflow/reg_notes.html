@@ -1,0 +1,16 @@
+{% if attendee.staffing %}
+    <br/> <br/>
+	Thank you for your intrest in volunteering to help at the convention. You've been added to our database and we will be in contact with you closer to the time of the convention to confirm your availability and where you would like to help. 
+<br><br>
+If you have any questions concering volunteering, please email us at volunteers@furfest.org
+{% endif %}
+
+{% if c.CONSENT_FORM_URL and attendee.consent_form %}
+    <br/> <br/>
+    Because you are under 18, you must bring a signed and notarized parental permission
+    to be granted admission to {{ c.EVENT_NAME }}.  You may download the consent form 
+    <a href="{{ c.CONSENT_FORM_URL }}">by clicking here</a> and selecting the correct form for your age. If you have any questions, please email us at registration@furfest.org.
+    <br/> <br/>
+    You may <a href="{{ c.URL_BASE }}/preregistration/confirm?id={{ attendee.id }}">click here</a>
+    to edit your info if you are over 18 and entered that age by mistake.
+	{% endif %}
