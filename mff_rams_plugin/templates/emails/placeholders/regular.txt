@@ -1,0 +1,7 @@
+{{ attendee.first_name }},
+
+You've been added to the {{ c.EVENT_NAME }} registration database, but we don't have all of your personal information{% if attendee.amount_unpaid %} and you have not yet paid your outstanding balance of ${{ attendee.amount_unpaid }}{% endif %}.  To ensure that you can pick up your badge with no hassles at registration, please fill out the rest of your info{% if attendee.amount_unpaid %} and pay{% endif %} at {{ c.URL_BASE }}/preregistration/confirm?id={{ attendee.id }}. You may also choose to upgrade your membership at this time, for an additional fee.
+
+If you have any questions, please email us at registration@furfest.org
+
+{{ c.REGDESK_EMAIL_SIGNATURE }}

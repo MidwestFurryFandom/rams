@@ -1,0 +1,7 @@
+{{ attendee.first_name }},
+
+Thanks for volunteering to help the staff of {{ c.EVENT_NAME }}!  You've been added to our registration database, but we don't have all of your personal information.  To ensure that you can pick up your badge with no hassles, please fill out the rest of your info at {{ c.URL_BASE }}/preregistration/confirm?id={{ attendee.id }}. You may also upgrade your membership at this point, for an additional cost.
+
+If you have any questions, please email us at registration@furfest.org
+
+{{ c.STOPS_EMAIL_SIGNATURE }}
