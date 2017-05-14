@@ -2,7 +2,7 @@
 <head></head>
 <body>
 
-You ({{ attendee.full_name }}) have preregistered for {{ c.EVENT_NAME }} at the {{attendee.badge_type}} level
+You ({{ attendee.full_name }}) have preregistered for {{ c.EVENT_NAME }} at the {{attendee.badge_type_label}} level
 {% if attendee.group %}
     by claiming one of the badges in the {{ attendee.group.name }} group.
 {% else %}
