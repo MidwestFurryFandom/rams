@@ -63,7 +63,7 @@
         </td>
         <td data-order="{{ group.badges_purchased }}" data-search="{{ group.badges_purchased }}"> {{ group.badges_purchased }} / {{ group.badges }} </td>
         <td>{{ group.tables }}</td>
-        <td>{% if group.power == 1 %}Yes
+        <td>{% if group.power >= 1 %}Yes
             {% else %}No{% endif %}
            </td>
         <td>${{ group.cost }}</td>
