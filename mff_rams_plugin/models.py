@@ -66,3 +66,6 @@ class Attendee:
         else:
             personal_cost = self.total_cost
         return max(0, personal_cost - self.amount_paid)
+    @property
+    def paid_for_a_swag_shirt(self):
+        return self.badge_type in [c.SPONSOR_BADGE, c.SHINY_BADGE]
