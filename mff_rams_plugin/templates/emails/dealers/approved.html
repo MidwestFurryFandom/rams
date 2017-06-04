@@ -1,0 +1,32 @@
+<html>
+<head></head>
+<body>
+{{ group.name }} has been approved as a {{ c.EVENT_NAME }} Dealer for this coming {{ event_dates() }}!
+You can pay the ${{ group.cost }} you owe using the credit card button
+<a href="{{ c.URL_BASE }}/preregistration/group_members?id={{ group.id }}">on this page</a>.
+Payment is expected by: {{ c.DEALER_PAYMENT_DUE|datetime_local }} or your application may be removed and your tables filled by another applicant.
+
+{% if group.unassigned_badges %}
+    <br/> <br/>
+    Some of your badges are not yet assigned to a specific person. Membership information for these badges must be provided before {{ c.PREREG_TAKEDOWN|datetime_local }}.
+    You may do this by <a href="{{ c.URL_BASE }}/preregistration/group_members?id={{ group.id }}">clicking here</a>.
+{% endif %}
+
+<br/> <br/>
+<p>
+This registration includes:
+<ul>
+    <li> {{ group.tables }} table{{ group.tables|pluralize }} (${{ group.table_cost|round(2) }}) </li>
+    <li> {{ group.badges }} badge{{ group.badges|pluralize }} (${{ group.badge_cost|round(2) }}) </li>
+</ul>
+(Note that "five tables" means that you have a 10' x 10' booth.) <br />
+</p>
+
+<br/> <u>Dealer Rules and Information</u>
+{% include "static_views/dealerRules.html" %}
+
+
+<br />Sincerely,<br />
+{{ c.MARKETPLACE_EMAIL_SIGNATURE }}
+</body>
+</html>
