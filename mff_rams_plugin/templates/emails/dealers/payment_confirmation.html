@@ -1,0 +1,17 @@
+{{ group.leader.first_name }},
+
+{{ group.name }} has been preregistered for {{ c.EVENT_NAME }} this coming {{ event_dates() }} and your payment of ${{ attendee.amount_paid }} has been received. Your group will have {{ group.tables }} Dealers Den table{{ group.table|pluralize }}. The Dealers Den manager will continue to be in touch with you to keep you informed of Dealers Den rules and procedures.
+
+{% if group.unassigned_badges %}
+    <br/> <br/>
+    Some of your badges are not yet assigned to a specific person. Membership information for those badges must be provided before {{ c.PREREG_DEADLINE|datetime_local }.
+    You may preassign your badges on your <a href="{{ c.URL_BASE }}/preregistration/group_members?id={{ group.id }}">group management page</a>. The individual registration links on the group management page can be filled out by you, or distributed to your group members for them to fill out themselves.
+{% endif %}
+
+<br/><br/>
+If you would like to add badges, then please email us as {{ c.MARKETPLACE_EMAIL }}.
+
+<br/><br/>
+Badges for preregistered Dealers and Helpers will be available for pickup at the Dealers Den Operations table. Note that a photo ID is required to pick up your badge. The location and hours of the Dealers Den Operations desk will be e-mailed prior to the event.
+
+{{ c.MARKETPLACE_EMAIL_SIGNATURE }}
