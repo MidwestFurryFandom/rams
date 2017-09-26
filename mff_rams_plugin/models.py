@@ -1,5 +1,6 @@
 from . import *
 
+
 @Session.model_mixin
 class Group:
     power = Column(Integer, default=0)
@@ -31,6 +32,7 @@ class Group:
         if self.is_dealer and self.is_new:
             self.can_add = True
 
+
 @Session.model_mixin
 class Attendee:
     comped_reason = Column(UnicodeText, default='', admin_only=True)
@@ -38,6 +40,12 @@ class Attendee:
     @presave_adjustment
     def never_spam(self):
         self.can_spam = False
+
+    @presave_adjustment
+    def not_attending_need_not_pay(self):
+        if self.badge_status == c.NOT_ATTENDING:
+            self.paid = c.NEED_NOT_PAY
+            self.comped_reason = "Automated: Not Attending badge status."
 
     @cost_property
     def badge_cost(self):
@@ -66,6 +74,7 @@ class Attendee:
         else:
             personal_cost = self.total_cost
         return max(0, personal_cost - self.amount_paid)
+
     @property
     def paid_for_a_swag_shirt(self):
         return self.badge_type in [c.SPONSOR_BADGE, c.SHINY_BADGE]
