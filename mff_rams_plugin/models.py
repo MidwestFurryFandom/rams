@@ -68,13 +68,5 @@ class Attendee:
             return c.get_attendee_price(registered)
 
     @property
-    def amount_unpaid(self):
-        if self.paid == c.PAID_BY_GROUP:
-            personal_cost = max(0, self.total_cost - c.BADGE_PRICE)
-        else:
-            personal_cost = self.total_cost
-        return max(0, personal_cost - self.amount_paid)
-
-    @property
     def paid_for_a_swag_shirt(self):
         return self.badge_type in [c.SPONSOR_BADGE, c.SHINY_BADGE]
