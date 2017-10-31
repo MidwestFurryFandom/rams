@@ -26,6 +26,9 @@
             $.field('placeholder').click(showOrHideCompedReason);
 
             showOrHideCompedReason();
+            if ($.field('omit_badge')) {
+                $.field('omit_badge').prop('checked', true)
+            }
         });
     </script>
 
