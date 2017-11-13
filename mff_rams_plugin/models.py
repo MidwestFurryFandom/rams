@@ -68,5 +68,16 @@ class Attendee:
             return c.get_attendee_price(registered)
 
     @property
+    def age_discount(self):
+        if 'val' in self.age_group_conf and self.age_group_conf['val'] == c.UNDER_13:
+            if self.badge_type == c.ATTENDEE_BADGE:
+                discount = 30
+            elif self.badge_type in [c.FRIDAY, c.SATURDAY, c.SUNDAY]:
+                discount = 10
+            if not self.age_group_conf['discount'] or self.age_group_conf['discount'] < discount:
+                return -discount
+        return -self.age_group_conf['discount']
+
+    @property
     def paid_for_a_swag_shirt(self):
         return self.badge_type in [c.SPONSOR_BADGE, c.SHINY_BADGE]
