@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<head>
+    <!-- Print and Reload Function -->
+    <script type="text/javascript">
+        window.print();
+
+        // reload to print the next badge
+        setTimeout(function() {window.location = "print_badges?minor={{ minor }}";}, 9000);
+    </script>
+    <!-- force chrome style for now -->
+    <style type="text/css">
+body {margin: 0; padding: 0;}
+#container {position: relative; height: 600px; width: 952px;
+
+#border: 1px solid black;
+
+}
+#bottom-row {position: absolute; top: 600px}
+#badge_type {
+	position: absolute;
+  text-align: right;
+	bottom: 0px;
+  left: 740px;
+  right: 0px;
+  width: 200px;
+	font-size: 30pt;
+	font-family: "Helvetica";
+	font-weight: bold;
+	#border: 1px solid black;
+}
+#badge_ribbon {
+	position: absolute;
+  text-align: center;
+	bottom: 0px;
+  left: 376px;
+  width: 200px;
+	font-size: 30pt;
+	font-family: "Helvetica";
+	font-weight: bold;
+}
+#badge_num {
+	position: absolute;
+	bottom: 0px;
+	left: 20px;
+  right: 200px;
+  width: 150px;
+	font-size: 30pt;
+	font-family: "Helvetica";
+	font-weight: bold;
+}
+#badge_name_holder {
+	display:table;
+	position: absolute;
+	width: 800px;
+	left: 0;
+	right: 0;
+	margin-left: auto;
+	margin-right: auto;
+  top: 300px;
+	bottom: 200px;
+	text-align: center;
+	font-size: 60pt;
+	font-family: Geneva, Tahoma, Verdana, sans-serif;
+	#border: 1px solid black;
+	height 200px;
+}
+
+#badge_name {
+	display: table-cell;
+	vertical-align: middle;
+}
+
+#daily-row {
+	display: block;
+	position: absolute;
+	width: 100%;
+	left: 0;
+	right: 0;
+	margin-left: auto;
+	margin-right: auto;
+	bottom:70px;
+	height: 21px;
+	color: white;
+	font-size: 30pt;
+	font-family: "Helvetica";
+	font-weight: bold;
+}
+
+#fridayDaily {
+	background-color: black;
+	width: 100%;
+	text-align: left;
+}
+
+#saturdayDaily {
+	background-color: black;
+	width: 100%;
+	text-align: center;
+}
+
+#sundayDaily {
+	background-color: black;
+	width: 100%;
+	text-align: right;
+}
+
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="badge_name_holder"><div id="badge_name">{{ badge_name }}</div></div>
+	<div id="daily-row">
+{% if badge_type is equalto "Friday" %}
+<div id="fridayDaily">
+&nbsp;&nbsp;Friday
+</div>
+{% elif badge_type is equalto "Saturday" %}
+<div id="SaturdayDaily">
+Saturday
+</div>
+{% elif badge_type is equalto "Sunday" %}
+<div id="SundayDaily">
+Sunday&nbsp;&nbsp;
+</div>
+{% endif %}
+
+	</div>
+        <div id="bottom-row">
+          <span id="badge_num">Badge #{{ '{0:04d}'.format(badge_num) }}</span>
+          <span id="badge_ribbon">{{ ribbon|safe }}</span>
+          <span id="badge_type">{{ badge_type|safe }}</span>
+        </div>
+    </div>
+</body>
+</html>
