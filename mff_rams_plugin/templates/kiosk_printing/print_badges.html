@@ -107,6 +107,8 @@ body {margin: 0; padding: 0;}
     </style>
 </head>
 <body>
+{% if badge_type == "Attendee" %}{% set badge_type = "Standard" %}
+{% elif badge_type == "Shiny Sponsor" %}{% set badge_type = "Shiny" %}{% endif %}
     <div id="container">
         <div id="badge_name_holder"><div id="badge_name">{{ badge_name }}</div></div>
 	<div id="daily-row">
