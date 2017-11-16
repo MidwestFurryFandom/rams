@@ -12,5 +12,7 @@ mount_site_sections(config['module_root'])
 
 c.MENU.append_menu_item(MenuItem(name='Midwest FurFest', access=c.PEOPLE, submenu=[
     MenuItem(name='Comped Badges', href='../mff_reports/comped_badges'),
+    MenuItem(name='Print Adult Badges', href='../kiosk_printing/print_badges'),
+    MenuItem(name='Print Minor Badges', href='../kiosk_printing/print_badges?minor=True'),
                                  ])
                         )
