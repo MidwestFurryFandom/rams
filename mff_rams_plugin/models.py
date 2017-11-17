@@ -47,6 +47,13 @@ class Attendee:
             self.paid = c.NEED_NOT_PAY
             self.comped_reason = "Automated: Not Attending badge status."
 
+    @presave_adjustment
+    def print_ready_before_event(self):
+        if c.PRE_CON:
+            if self.badge_status == c.COMPLETED_STATUS and not self.is_not_ready_to_checkin\
+                    and self.times_printed < 1 and self.ribbon != c.STAFF_RIBBON:
+                self.print_pending = True
+
     @cost_property
     def badge_cost(self):
         registered = self.registered_local if self.registered else None
@@ -66,6 +73,17 @@ class Attendee:
             return max(0, c.get_attendee_price(registered) + self.age_discount)
         else:
             return c.get_attendee_price(registered)
+
+    @property
+    def age_discount(self):
+        if 'val' in self.age_group_conf and self.age_group_conf['val'] == c.UNDER_13 and c.AT_THE_CON:
+            if self.badge_type == c.ATTENDEE_BADGE:
+                discount = 30
+            elif self.badge_type in [c.FRIDAY, c.SATURDAY, c.SUNDAY]:
+                discount = 10
+            if not self.age_group_conf['discount'] or self.age_group_conf['discount'] < discount:
+                return -discount
+        return -self.age_group_conf['discount']
 
     @property
     def paid_for_a_swag_shirt(self):
