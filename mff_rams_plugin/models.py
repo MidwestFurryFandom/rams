@@ -47,6 +47,13 @@ class Attendee:
             self.paid = c.NEED_NOT_PAY
             self.comped_reason = "Automated: Not Attending badge status."
 
+    @presave_adjustment
+    def print_ready_before_event(self):
+        if c.PRE_CON:
+            if self.badge_status == c.COMPLETED_STATUS and not self.is_not_ready_to_checkin\
+                    and self.times_printed < 1 and self.ribbon != c.STAFF_RIBBON:
+                self.print_pending = True
+
     @cost_property
     def badge_cost(self):
         registered = self.registered_local if self.registered else None
