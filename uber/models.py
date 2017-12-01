@@ -616,6 +616,12 @@ class Session(SessionManager):
             if self.query(Attendee).filter(Attendee.badge_num == new_badge_num).first():
                 new_badge_num = self.auto_badge_num(badge_type, False)
 
+            # If we're dealing with a lot of badges in the session and we started filling a gap,
+            # we could accidentally end up with a badge number that already exists.
+            # If this happened, grab the latest badge number without gaps.
+            if self.query(Attendee).filter(Attendee.badge_num == new_badge_num).first():
+                new_badge_num = self.auto_badge_num(badge_type, False)
+
             assert new_badge_num < upper_bound, 'There are no more badge numbers available in this range!'
 
             return new_badge_num
@@ -916,7 +922,7 @@ class Session(SessionManager):
                 return 'Custom badges have already been ordered, so you will need to select a different badge type'
             elif diff > 0:
                 for i in range(diff):
-                    group.attendees.append(Attendee(badge_type=new_badge_type, ribbon=ribbon_to_use, paid=paid, **extra_create_args))
+                    group.attendees.append(Attendee(badge_type=new_badge_type, badge_num=None, ribbon=ribbon_to_use, paid=paid, **extra_create_args))
             elif diff < 0:
                 if len(group.floating) < abs(diff):
                     return 'You cannot reduce the number of badges for a group to below the number of assigned badges'
@@ -1267,6 +1273,9 @@ class Attendee(MagModel, TakesPaymentMixin):
         if self.paid != c.REFUNDED:
             self.amount_refunded = 0
 
+        if self.paid == c.NOT_PAID and self.amount_paid > 0:
+            self.paid = c.HAS_PAID
+
         if self.badge_cost == 0 and self.paid in [c.NOT_PAID, c.PAID_BY_GROUP]:
             self.paid = c.NEED_NOT_PAY
 
@@ -1378,8 +1387,6 @@ class Attendee(MagModel, TakesPaymentMixin):
             return 0
         elif self.overridden_price is not None:
             return self.overridden_price
-        elif self.is_dealer:
-            return c.DEALER_BADGE_PRICE
         elif self.badge_type == c.ONE_DAY_BADGE:
             return c.get_oneday_price(registered)
         elif self.is_presold_oneday:
@@ -1388,8 +1395,6 @@ class Attendee(MagModel, TakesPaymentMixin):
             return int(c.BADGE_TYPE_PRICES[self.badge_type])
         elif self.age_discount != 0:
             return max(0, c.get_attendee_price(registered) + self.age_discount)
-        elif self.group and self.paid == c.PAID_BY_GROUP:
-            return c.get_attendee_price(registered) - c.GROUP_DISCOUNT
         else:
             return c.get_attendee_price(registered)
 
