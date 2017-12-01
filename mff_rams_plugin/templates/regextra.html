@@ -9,7 +9,7 @@
         <div id="print_pending" class="form-group">
             <label for="print_pending" class="col-sm-2 control-label">Ready to Print</label>
             <div class="col-sm-6">
-                {{ macros.checkbox(attendee, 'print_pending') }}
+                {{ attendee.print_pending|yesno }}
             </div>
         </div>
     {% endif %}
