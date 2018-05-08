@@ -1,5 +1,12 @@
 from . import *
 
+@Session.model_mixin
+class SessionMixin:
+    def all_panelists(self):
+        return self.query(Attendee).filter(or_(
+            Attendee.ribbon.contains(c.PANELIST_RIBBON),
+            Attendee.ribbon == c.STAFF_RIBBON,
+            Attendee.badge_type == c.GUEST_BADGE)).order_by(Attendee.full_name).all()
 
 @Session.model_mixin
 class Group:
