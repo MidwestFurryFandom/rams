@@ -589,21 +589,26 @@ class Session(SessionManager):
 
         def get_next_badge_num(self, badge_type):
             """
-            Returns the next badge available for a given badge type. This is essentially a wrapper for auto_badge_num
-            that accounts for new or changed objects in the session.
-
-            :param badge_type: Used to pass to auto_badge_num and to ignore objects in the session that aren't within
-            the badge type's range.
-            :return:
+            Returns the next badge available for a given badge type. This is
+            essentially a wrapper for auto_badge_num that accounts for new or
+            changed objects in the session.
+            Args:
+                badge_type: Used to pass to auto_badge_num and to ignore
+                    objects in the session that aren't within the badge
+                    type's range.
             """
             badge_type = get_real_badge_type(badge_type)
 
             new_badge_num = self.auto_badge_num(badge_type)
+            lower_bound = c.BADGE_RANGES[badge_type][0]
+            upper_bound = c.BADGE_RANGES[badge_type][1]
+
             # Adjusts the badge number based on badges in the session
-            for attendee in [m for m in chain(self.new, self.dirty) if isinstance(m, Attendee)]:
-                if attendee.badge_num is not None \
-                        and c.BADGE_RANGES[badge_type][0] <= attendee.badge_num <= c.BADGE_RANGES[badge_type][1]:
-                    new_badge_num = max(self.auto_badge_num(badge_type), 1 + attendee.badge_num, new_badge_num)
+            all_models = chain(self.new, self.dirty)
+            for attendee in [m for m in all_models if isinstance(m, Attendee)]:
+                if attendee.badge_num is not None and \
+                                        lower_bound <= attendee.badge_num <= upper_bound:
+                    new_badge_num = max(new_badge_num, 1 + attendee.badge_num)
 
             # If we're dealing with a lot of badges in the session and we started filling a gap,
             # we could accidentally end up with a badge number that already exists.
@@ -611,62 +616,88 @@ class Session(SessionManager):
             if self.query(Attendee).filter(Attendee.badge_num == new_badge_num).first():
                 new_badge_num = self.auto_badge_num(badge_type, False)
 
-            assert new_badge_num < c.BADGE_RANGES[badge_type][1], 'There are no more badge numbers available in this range!'
+            # If we're dealing with a lot of badges in the session and we started filling a gap,
+            # we could accidentally end up with a badge number that already exists.
+            # If this happened, grab the latest badge number without gaps.
+            if self.query(Attendee).filter(Attendee.badge_num == new_badge_num).first():
+                new_badge_num = self.auto_badge_num(badge_type, False)
+
+            assert new_badge_num < upper_bound, 'There are no more badge numbers available in this range!'
 
             return new_badge_num
 
         def update_badge(self, attendee, old_badge_type, old_badge_num):
             """
-            This should be called whenever an attendee's badge type or badge number is changed by an admin. It checks
-            if the attendee will still require a badge number with their new badge type, and if so, sets their number
-            to either the number specified by the admin or the lowest available badge number in that range.
-
-            :param attendee: The Attendee() object whose badge is being changed.
-            :param old_badge_type: The old badge type.
-            :param old_badge_num: The old badge number.
-            :return:
+            This should be called whenever an attendee's badge type or badge
+            number is changed. It checks if the attendee will still require a
+            badge number with their new badge type, and if so, sets their
+            number to either the number specified by the admin or the lowest
+            available badge number in that range.
+            Args:
+                attendee: The Attendee() object whose badge is being changed.
+                old_badge_type: The old badge type.
+                old_badge_num: The old badge number.
             """
             from uber.badge_funcs import needs_badge_num
-            old_badge_num = int(old_badge_num or 0) or None
-            was_dupe_num = self.query(Attendee).filter(Attendee.badge_num == old_badge_num,
-                                                       Attendee.id != attendee.id).first()
 
-            if not was_dupe_num and old_badge_type == attendee.badge_type and (not attendee.badge_num or old_badge_num == attendee.badge_num):
-                attendee.badge_num = old_badge_num
-                return 'Attendee is already {} with badge {}'.format(c.BADGES[old_badge_type], old_badge_num)
+            if c.SHIFT_CUSTOM_BADGES and c.BEFORE_PRINTED_BADGE_DEADLINE and \
+                    not c.AT_THE_CON:
 
-            if c.SHIFT_CUSTOM_BADGES:
-                # fill in the gap from the old number, if applicable
-                badge_num_keep = attendee.badge_num
-                if old_badge_num and not was_dupe_num:
-                    self.shift_badges(old_badge_type, old_badge_num + 1, down=True)
-
-                # make room for the new number, if applicable
+                badge_collision = False
                 if attendee.badge_num:
-                    offset = 1 if old_badge_type == attendee.badge_type and attendee.badge_num > (old_badge_num or 0) else 0
-                    no_gap = self.query(Attendee).filter(Attendee.badge_type == attendee.badge_type,
-                                                         Attendee.badge_num == attendee.badge_num,
-                                                         Attendee.id != attendee.id).first()
+                    badge_collision = self.query(Attendee.badge_num).filter(
+                        Attendee.badge_num == attendee.badge_num,
+                        Attendee.id != attendee.id).first()
 
-                    if no_gap:
-                        self.shift_badges(attendee.badge_type, attendee.badge_num + offset, up=True)
-                attendee.badge_num = badge_num_keep
+                desired_badge_num = attendee.badge_num
+                if old_badge_num:
+                    if attendee.badge_num and badge_collision:
+                        if old_badge_type == attendee.badge_type:
+                            if old_badge_num < attendee.badge_num:
+                                self.shift_badges(
+                                    old_badge_type,
+                                    old_badge_num + 1,
+                                    until=attendee.badge_num,
+                                    down=True)
+                            else:
+                                self.shift_badges(
+                                    old_badge_type,
+                                    attendee.badge_num,
+                                    until=old_badge_num - 1,
+                                    up=True)
+                        else:
+                            self.shift_badges(
+                                old_badge_type,
+                                old_badge_num + 1,
+                                down=True)
+                            self.shift_badges(
+                                attendee.badge_type,
+                                attendee.badge_num,
+                                up=True)
+                    else:
+                        self.shift_badges(
+                            old_badge_type, old_badge_num + 1, down=True)
+
+                elif attendee.badge_num and badge_collision:
+                    self.shift_badges(
+                        attendee.badge_type, attendee.badge_num, up=True)
+
+                attendee.badge_num = desired_badge_num
 
             if not attendee.badge_num and needs_badge_num(attendee):
-                attendee.badge_num = self.get_next_badge_num(attendee.badge_type)
+                attendee.badge_num = self.get_next_badge_num(
+                    attendee.badge_type)
 
             return 'Badge updated'
 
         def auto_badge_num(self, badge_type, fill_gap=True):
             """
             Gets the next available badge number for a badge type's range.
-
-            Plugins can override the logic here if need be without worrying about handling dirty sessions.
-
-            :param badge_type: Used as a starting point if no badges of the same type exist, and to select badges within
-            a specific range.
-            :param fill_gap: Determines whether we try to find a gap in badge numbers to fill
-            :return:
+            Plugins can override the logic here if need be without worrying
+            about handling dirty sessions.
+            Args:
+                badge_type: Used as a starting point if no badges of the same
+                    type exist, and to select badges within a specific range.
             """
             in_range = self.query(Attendee.badge_num).filter(
                 Attendee.badge_num != None,  # noqa: E711
