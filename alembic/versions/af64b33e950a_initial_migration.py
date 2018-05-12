@@ -15,12 +15,12 @@ depends_on = None
 
 from alembic import op
 import sqlalchemy as sa
-import sideboard.lib.sa
+import residue
 
 
 try:
     is_sqlite = op.get_context().dialect.name == 'sqlite'
-except:
+except Exception:
     is_sqlite = False
 
 if is_sqlite:
@@ -52,11 +52,11 @@ sqlite_reflect_kwargs = {
 
 
 def upgrade():
-    op.add_column('attendee', sa.Column('comped_reason', sideboard.lib.sa.CoerceUTF8(), server_default='', nullable=False))
-    op.add_column('group', sa.Column('location', sideboard.lib.sa.CoerceUTF8(), server_default='', nullable=False))
+    op.add_column('attendee', sa.Column('comped_reason', residue.CoerceUTF8(), server_default='', nullable=False))
+    op.add_column('group', sa.Column('location', residue.CoerceUTF8(), server_default='', nullable=False))
     op.add_column('group', sa.Column('power', sa.Integer(), server_default='0', nullable=False))
     op.add_column('group', sa.Column('power_fee', sa.Integer(), server_default='0', nullable=False))
-    op.add_column('group', sa.Column('power_usage', sideboard.lib.sa.CoerceUTF8(), nullable=False))
+    op.add_column('group', sa.Column('power_usage', residue.CoerceUTF8(), nullable=False))
     op.add_column('group', sa.Column('table_fee', sa.Integer(), server_default='0', nullable=False))
     # ### end Alembic commands ###
 

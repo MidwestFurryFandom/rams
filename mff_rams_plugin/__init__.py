@@ -1,18 +1,10 @@
-from uber.common import *
-from ._version import __version__
-from .config import *
-from .models import *
-from .model_checks import *
-from .automated_emails import *
+from os.path import join
+
+from uber.jinja import template_overrides
+from uber.utils import mount_site_sections, static_overrides
+from .config import config
+
 
 static_overrides(join(config['module_root'], 'static'))
 template_overrides(join(config['module_root'], 'templates'))
 mount_site_sections(config['module_root'])
-
-
-c.MENU.append_menu_item(MenuItem(name='Midwest FurFest', access=c.PEOPLE, submenu=[
-    MenuItem(name='Comped Badges', href='../mff_reports/comped_badges'),
-    MenuItem(name='Print Adult Badges', href='../kiosk_printing/print_badges'),
-    MenuItem(name='Print Minor Badges', href='../kiosk_printing/print_badges?minor=True'),
-                                 ])
-                        )
