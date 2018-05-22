@@ -1,6 +1,6 @@
 {{ group.leader.first_name }},
 
-{{ group.name }} has been preregistered for {{ c.EVENT_NAME }} this coming {{ event_dates() }} and your payment of ${{ attendee.amount_paid }} has been received. Your group will have {{ group.tables }} Dealers Den table{{ group.table|pluralize }}. The Dealers Den manager will continue to be in touch with you to keep you informed of Dealers Den rules and procedures.
+{{ group.name }} has been preregistered for {{ c.EVENT_NAME }} this coming {{ event_dates() }} and your payment of ${{ attendee.amount_paid }} has been received. Your group will have a {{ group.tables_repr }} in the Dealers Den. The Dealers Den manager will continue to be in touch with you to keep you informed of Dealers Den rules and procedures.
 
 {% if group.unassigned_badges %}
     <br/> <br/>

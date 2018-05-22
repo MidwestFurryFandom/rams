@@ -8,7 +8,7 @@ this coming {{ event_dates() }}. Below is a copy of your application. You may
 <a href="{{ c.URL_BASE }}/preregistration/confirm?id={{ group.leader.id }}">view your badge here</a>.
 <ul>
     <li><strong>Dealer Table Name</strong>: {{ group.name }}</li>
-    <li><strong>Tables</strong>: {{ group.tables }} table{{ group.tables|pluralize }} (${{ group.table_cost|round(2) }}) </li>
+    <li><strong>Tables</strong>: {{ group.tables_repr }} (${{ group.table_cost|round(2) }}) </li>
     <li><strong>Badges</strong>: {{ group.badges }} badge{{ group.badges|pluralize }} (${{ group.badge_cost|round(2) }}) </li>
     {% if group.power %}
     <li><strong>Power Cost</strong>: ${{ group.power_cost }}
