@@ -3,6 +3,7 @@ import re
 from uber.decorators import prereg_validation, validation
 from uber.config import c
 from uber.model_checks import ignore_unassigned_and_placeholders
+from uber.models import Session
 
 
 @validation.Attendee
@@ -68,3 +69,13 @@ def power_usage(group):
     if group.power and not group.power_usage:
         return 'Please provide a list of what powered devices you ' \
                'expect to use.'
+
+
+@prereg_validation.Attendee
+def promo_code_is_useful(attendee):
+    if attendee.promo_code:
+        with Session() as session:
+            if session.lookup_agent_code(attendee.promo_code.code):
+                return
+            else:
+                return 'Invalid agent code'

@@ -1,4 +1,12 @@
-
+{% if c.PAGE_PATH == '/preregistration/index' %}
+    <script type="text/javascript">
+        $(function () {
+            $('li:contains("promo code")').each(function() {
+                $(this).remove();
+            });
+        });
+    </script>
+{% endif %}
 
 {% if c.PAGE_PATH == '/registration/form' %}
     <script type="text/javascript">
