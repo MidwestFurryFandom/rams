@@ -57,6 +57,11 @@
             $("label:contains('Badge Level')").append(levels);
         }
 
+        // No Registration Type boxes
+        if ($('#reg-types').length) {
+            $('#reg-types').hide();
+        }
+
         // Also set visibility when the page loads
         setVisible('.shirt-row', $.val('badge_type') == {{ c.SPONSOR_BADGE }} || $.val('badge_type') ==  {{ c.SHINY_BADGE }});
         setVisible('.badge-row', true);
