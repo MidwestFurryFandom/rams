@@ -57,6 +57,11 @@
             $("label:contains('Badge Level')").append(levels);
         }
 
+        // No Registration Type boxes
+        if ($('#reg-types').length) {
+            $('#reg-types').hide();
+        }
+
         // Also set visibility when the page loads
         setVisible('.shirt-row', $.val('badge_type') == {{ c.SPONSOR_BADGE }} || $.val('badge_type') ==  {{ c.SHINY_BADGE }});
         setVisible('.badge-row', true);
@@ -69,7 +74,7 @@
         // Increase maximum length of badge_printed_name and make it bold
         $.field('badge_printed_name').prop('maxlength', 30);
         $("label[for='badge_printed_name']").removeClass('optional-field');
-        $('p:contains("Badge names have a maximum of 20 characters.")').text("Badge names have a maximum of 30 characters.")
+        $('p:contains("Badge names have a maximum of 20 characters.")').text("Badge names have a maximum of 30 characters.");
     });
 
     // We don't use amount_extra so we don't want this to do anything
@@ -78,6 +83,12 @@
     // We don't want attendees to be able to invalidate themselves
     if ($("[form='invalidate']").length) {
         $("[form='invalidate']").remove()
+    }
+
+    // No promo codes! Agent codes!
+    if ($.field('promo_code')) {
+        $("label[for='promo_code']").text("Agent Code");
+        $.field('promo_code').attr("placeholder", "A code from an artist to assign you as their agent");
     }
 </script>
 
