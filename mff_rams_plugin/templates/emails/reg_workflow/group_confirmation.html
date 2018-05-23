@@ -6,7 +6,7 @@
 {{ c.EVENT_NAME }} this coming {{ event_dates() }} and your payment of ${{ group.amount_paid }} has been received.</p>
 
 {% if group.is_dealer %}
-<p>Your group will have {{ group.tables }} Dealers Den table{{ group.table|pluralize }}. The Dealers Den manager will continue to be in touch with you to keep you informed of Dealers Den rules and procedures.
+<p>Your group will have a {{ group.tables_repr }} in the Dealers Den. The Dealers Den manager will continue to be in touch with you to keep you informed of Dealers Den rules and procedures.
 </p>
 {% endif %}
 

@@ -1,8 +1,10 @@
+from datetime import timedelta
 from uber.models import Session
 from sqlalchemy import or_
 from uber.config import c
+from uber.utils import localized_now, localize_datetime
 from uber.models.types import DefaultColumn as Column
-from residue import CoerceUTF8 as UnicodeText
+from residue import CoerceUTF8 as UnicodeText, UTCDateTime
 from sqlalchemy.types import Integer
 from uber.decorators import cost_property, presave_adjustment
 
@@ -24,6 +26,7 @@ class Group:
     power_usage = Column(UnicodeText)
     location = Column(UnicodeText, default='', admin_only=True)
     table_fee = Column(Integer, default=0)
+    tax_number = Column(UnicodeText)
 
     @cost_property
     def power_cost(self):
@@ -46,10 +49,24 @@ class Group:
         """
         return 10
 
+    @property
+    def dealer_payment_due(self):
+        if self.approved:
+            return self.approved + timedelta(44)
+
+    @property
+    def dealer_payment_is_late(self):
+        if self.approved:
+            return localized_now() > localize_datetime(self.dealer_payment_due)
+
     @presave_adjustment
     def dealers_add_badges(self):
         if self.is_dealer and self.is_new:
             self.can_add = True
+
+    @property
+    def tables_repr(self):
+        return c.TABLE_OPTS[int(self.tables) - 1][1]
 
 
 @Session.model_mixin

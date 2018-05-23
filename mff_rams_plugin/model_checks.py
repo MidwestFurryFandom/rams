@@ -71,6 +71,35 @@ def power_usage(group):
                'expect to use.'
 
 
+@validation.Group
+def no_edit_post_approval(group):
+    if group.status == c.APPROVED:
+        no_change = []
+        if group.orig_value_of('categories') != group.categories:
+            no_change.append('categories')
+        if group.orig_value_of('categories_text') != group.categories_text:
+            no_change.append('other category description')
+        if group.orig_value_of('special_needs') != group.special_needs:
+            no_change.append('special requests')
+        if group.orig_value_of('country') != group.country:
+            no_change.append('country')
+        if group.orig_value_of('address1') != group.address1:
+            no_change.append('street address')
+        if group.orig_value_of('address2') != group.address2:
+            no_change.append('street address line 2')
+        if group.orig_value_of('city') != group.city:
+            no_change.append('city')
+        if group.orig_value_of('region') != group.region:
+            no_change.append('region')
+        if group.orig_value_of('zip_code') != group.zip_code:
+            no_change.append('postal code')
+        if group.orig_value_of('tax_number') != group.tax_number:
+            no_change.append('IBT number')
+
+        if no_change:
+            return "You cannot change the following information after your application has been approved: {}.".format(', '.join(no_change))
+
+
 @prereg_validation.Attendee
 def promo_code_is_useful(attendee):
     if attendee.promo_code:
