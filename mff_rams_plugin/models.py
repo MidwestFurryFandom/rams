@@ -129,5 +129,5 @@ class Attendee:
         return -self.age_group_conf['discount']
 
     @property
-    def paid_for_a_swag_shirt(self):
+    def paid_for_a_shirt(self):
         return self.badge_type in [c.SPONSOR_BADGE, c.SHINY_BADGE]
