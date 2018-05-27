@@ -98,13 +98,3 @@ def no_edit_post_approval(group):
 
         if no_change:
             return "You cannot change the following information after your application has been approved: {}.".format(', '.join(no_change))
-
-
-@prereg_validation.Attendee
-def promo_code_is_useful(attendee):
-    if attendee.promo_code:
-        with Session() as session:
-            if session.lookup_agent_code(attendee.promo_code.code):
-                return
-            else:
-                return 'Invalid agent code'

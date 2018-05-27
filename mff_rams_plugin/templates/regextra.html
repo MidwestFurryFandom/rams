@@ -85,10 +85,11 @@
         $("[form='invalidate']").remove()
     }
 
-    // No promo codes! Agent codes!
+    // No promo codes! Registration codes!
     if ($.field('promo_code')) {
-        $("label[for='promo_code']").text("Agent Code");
-        $.field('promo_code').attr("placeholder", "A code from an artist to assign you as their agent");
+        $("label[for='promo_code']").text("Registration Code");
+        $.field('promo_code').attr("placeholder", "A discount code or an agent code");
+        $('<p class="help-text"><em>If you have a discount code, enter it now. Agent codes may be added via the link you receive in your confirmation email.</em></p>').insertAfter($.field('promo_code'));
     }
 </script>
 
