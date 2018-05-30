@@ -1,4 +1,6 @@
-from uber.common import *
+from uber.config import c
+from uber.decorators import all_renderable
+from uber.models import Attendee
 
 
 @all_renderable(c.PEOPLE)
@@ -7,7 +9,8 @@ class Root:
         pass
 
     def comped_badges(self, session, message='', show='all'):
-        all_comped = session.valid_attendees().filter(Attendee.paid == c.NEED_NOT_PAY)
+        all_comped = session.valid_attendees()\
+            .filter(Attendee.paid == c.NEED_NOT_PAY)
         claimed_comped = all_comped.filter(Attendee.placeholder == False)
         unclaimed_comped = all_comped.filter(Attendee.placeholder == True)
         if show == 'claimed':
