@@ -54,7 +54,7 @@
         </select>
         {% else %}
         <input type="checkbox" name="power" id="power" value="1" {% if group.power %}checked="checked"{% endif %} {% if group and not group.is_new %}disabled="disabled"{% endif %} />
-        <label for="power" class="optional-field">I need power at my table. (${{ c.POWER_PRICE }})</label>
+        <label for="power" class="optional-field">I need power at my table. (${{ c.POWER_PRICES[1] }})</label>
         {% endif %}
     </div>
 </div>
