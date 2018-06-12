@@ -8,7 +8,7 @@ You ({{ attendee.full_name }}) have preregistered for {{ c.EVENT_NAME }} at the 
 {% else %}
     and your payment of ${{ attendee.amount_paid }} has been received.  
 {% endif %}
-<br><br>
+<br/><br/>
 Your registration confirmation number is {{ attendee.id }}. You can update your contact information, change your badge name, or upgrade you registration level by clicking <a href="{{ c.URL_BASE }}/preregistration/confirm?id={{ attendee.id }}">here</a>.
 <br/> <br/>
 
@@ -17,12 +17,13 @@ Badges are not mailed out before the event, so your badge will be available for 
 
 {% include "emails/reg_workflow/reg_notes.html" %}
 
-<br><br>
+Your registration may be cancelled and refunded until preregistration closes at {{ c.PREREG_TAKEDOWN|datetime_local }}. Please email registration@furfest.org to request a cancellation and refund.
+<br/><br/>
 If you have any other questions about your registration, please email us at registration@furfest.org. Thank you for again registering for Midwest FurFest and we’ll see you at the con.
-<br><br>
-Midwest FurFest Regsitration Team<br>
-registration@furfest.org<br>
-http://furfest.org<br>
+<br/><br/>
+Midwest FurFest Regsitration Team<br/>
+registration@furfest.org<br/>
+http://furfest.org<br/>
 </body>
 
 </html>
