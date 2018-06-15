@@ -52,7 +52,7 @@ class Group:
     @property
     def dealer_payment_due(self):
         if self.approved:
-            return self.approved + timedelta(44)
+            return self.approved + timedelta(c.DEALER_PAYMENT_DAYS)
 
     @property
     def dealer_payment_is_late(self):
