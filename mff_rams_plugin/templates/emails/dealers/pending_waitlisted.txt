@@ -1,0 +1,5 @@
+{{ group.leader.first_name }}, 
+
+I regret to inform you that you have been placed on the waiting list for dealer space at this year's {{ c.EVENT_NAME}}. 
+Please be assured that your placement on the waiting list in no way reflects a rejection of your suitability to deal at {{ c.EVENT_NAME }}. The simple truth is that I received many more applications than I have available tables, and had to make some difficult decisions. If tables later become available, you will be notified.
+{{ c.MARKETPLACE_EMAIL_SIGNATURE }}
