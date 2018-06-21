@@ -1,0 +1,4 @@
+{{ group.leader.first_name }}, 
+
+I regret to inform you that the waitlist for {{c.EVENT_NAME}} has expired, and thus your application for dealer space has been declined. We have received many more applications for space than are available, and unfortunately that means I must decline some applications. We hope you will apply again next year. In case you still wish to attend the event, we have converted your badges and you will be able to pay for them at the rate in effect when you applied for dealer space. 
+{{ c.MARKETPLACE_EMAIL_SIGNATURE }}
