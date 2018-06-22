@@ -4,7 +4,7 @@
 {{ group.name }} has been approved as a {{ c.EVENT_NAME }} Dealer for this coming {{ event_dates() }}!
 You can pay the ${{ group.cost }} you owe using the credit card button
 <a href="{{ c.URL_BASE }}/preregistration/group_members?id={{ group.id }}">on this page</a>.
-Payment is expected by: {{ c.DEALER_PAYMENT_DUE|datetime_local }} or your application may be removed and your tables filled by another applicant.
+Payment is expected by: {{ group.dealer_payment_due|datetime_local }} or your application may be removed and your tables filled by another applicant.
 
 {% if group.unassigned_badges %}
     <br/> <br/>
@@ -23,7 +23,40 @@ This registration includes:
 </p>
 
 <br/> <u>Dealer Rules and Information</u>
-{% include "static_views/dealerRules.html" %}
+<ul>
+<li>Your displays and products cannot block the aisles or walkways, but must remain within the table or booth space purchased.</li>
+<li>No selling out of a hotel room, away from the dealer area, or away from your table.</li>
+<li>A list of confirmed dealers will be posted to the web site and will be included in our ConBook. This listing will include your business name and the description of your merchandise from your application, along with a link to your website if one was listed on your dealer application. Dealers are encouraged to check their listing on the web site and promptly request any changes or corrections.</li>
+<li>Advertising space is available in our convention book. If you are interested in purchasing an ad please contact {{ c.PUBLICATIONS_EMAIL }}.</li>
+<li>You are required to collect Illinois sales tax at MFF. You are not required to have an Illinois business license, but if you wish to obtain one you may do so at {{ c.BUSINESS_LICENSE_URL }} . MFF will be providing sales tax reporting forms at the con to those dealers who do not have an Illinois business license. We are required to provide a list of our dealers to IDOR, but we will not be collecting tax payments from our dealers.</li>
+<li>An email will be sent to all dealers about three weeks before Midwest Furfest with details on parking and unloading access, and any other information you may need before arriving.</li>
+<li>Any questions regarding Dealers Den operations should be directed to {{ c.MARKETPLACE_EMAIL }}</li>
+<li>If for any reason you are unable to deal at Midwest FurFest, please notify us promptly. Full refunds can be made if we receive your cancellation prior to {{ c.DEALER_REG_SHUTDOWN|datetime_local }}. After that date, refunds are possible only if we are able to resell your space.
+</li>
+</ul>
+<div>
+(TENTATIVE) DEALERS DEN HOURS: <br />
+<p>
+Thursday <br />
+TBA Dealer set-up
+</p>
+<p>
+Friday  <br />
+10am -- 1pm Dealer set-up <br />
+1pm -- 7pm Open for sales
+</p>
+<p>
+Saturday  <br />
+9am -- 10am Dealer set-up <br />
+10am -- 6pm Open for sales
+</p>
+<p>
+Sunday<br />
+9am -- 10am Dealer set-up <br />
+10am -- 4pm Open for sales <br />
+4pm -- 7pm Dealer tear-down 
+</p>
+</div>
 
 
 <br />Sincerely,<br />
