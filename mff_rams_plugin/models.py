@@ -24,7 +24,7 @@ class ArtShowApplication:
     @property
     def incomplete_reason(self):
         if self.status != c.APPROVED:
-            return "Not approved"
+            return self.status_label
         if self.attendee.badge_status == c.NEW_STATUS:
             return "Missing registration info"
 
