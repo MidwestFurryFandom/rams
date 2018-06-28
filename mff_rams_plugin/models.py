@@ -25,8 +25,6 @@ class ArtShowApplication:
     def incomplete_reason(self):
         if self.status != c.APPROVED:
             return "Not approved"
-        if self.delivery_method == c.AGENT and not self.agent:
-            return "Agent required"
         if self.attendee.badge_status == c.NEW_STATUS:
             return "Missing registration info"
 
