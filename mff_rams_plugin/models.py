@@ -20,6 +20,18 @@ class SessionMixin:
 
 
 @Session.model_mixin
+class ArtShowApplication:
+    @property
+    def incomplete_reason(self):
+        if self.status != c.APPROVED:
+            return "Not approved"
+        if self.delivery_method == c.AGENT and not self.agent:
+            return "Agent required"
+        if self.attendee.badge_status == c.NEW_STATUS:
+            return "Missing registration info"
+
+
+@Session.model_mixin
 class Group:
     power = Column(Integer, default=0)
     power_fee = Column(Integer, default=0)
