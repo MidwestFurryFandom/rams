@@ -22,7 +22,7 @@
 
 <script type="text/javascript">
     $(function() {
-        {% if '/groups/form' not in c.PAGE_PATH %}
+        {% if '/groups/' not in c.PAGE_PATH %}
         if ($("form[action*='delete']")) {
                 $("form[action*='delete']").remove();
             }
