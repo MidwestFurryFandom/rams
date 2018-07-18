@@ -66,7 +66,8 @@ class Group:
 
     @property
     def tables_repr(self):
-        return c.TABLE_OPTS[int(self.tables) - 1][1]
+        return c.TABLE_OPTS[int(self.tables) - 1][1] if self.tables \
+            else "No Table"
 
 
 @Session.model_mixin
