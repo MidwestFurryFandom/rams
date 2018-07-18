@@ -37,7 +37,8 @@
         {% if group.status == c.APPROVED and not admin_area %}
             $(function() {
                 $("form[action='group_members'] :input").prop('title','You cannot edit this information after you have been approved.');
-                $( "[name='name'], [name='website'], [name='description'], [name='power_usage']" ).attr("readonly", false).prop('title', '');
+                $( "[name='name'], [name='website'], [name='description'], [name='power_usage'], [name='tax_number'], [name='special_needs']" )
+                    .attr("readonly", false).prop('title', '');
                 $("form[action='group_members'] :submit").attr("disabled", false).prop('title', '');
             });
         {% endif %}
@@ -87,9 +88,9 @@
 </script>
 
 <div class="form-group">
-    <label for="location" class="col-sm-2 control-label">Table Assignment</label>
+    <label for="location" class="col-sm-3 control-label">Table Assignment</label>
     <div class="col-sm-6">
-        <input type="text" name="location" value="{{ group.location }}" placeholder="Dealer's table location" />
+        <input type="text" name="location" value="{{ group.location }}" class="form-control" placeholder="Dealer's table location" />
     </div>
 </div>
 {% endif %}
