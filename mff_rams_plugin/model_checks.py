@@ -71,7 +71,7 @@ def power_usage(group):
                'expect to use.'
 
 
-@validation.Group
+@prereg_validation.Group
 def no_edit_post_approval(group):
     if group.status == c.APPROVED:
         no_change = []

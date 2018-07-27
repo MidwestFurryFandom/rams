@@ -22,9 +22,11 @@
 
 <script type="text/javascript">
     $(function() {
+        {% if '/groups/' not in c.PAGE_PATH %}
         if ($("form[action*='delete']")) {
                 $("form[action*='delete']").remove();
             }
+        {% endif %}
 
         if ($("form[action*='lost_badge']")) {
             $("form[action*='lost_badge']").remove();
