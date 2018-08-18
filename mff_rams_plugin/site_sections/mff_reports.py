@@ -78,3 +78,20 @@ class Root:
                     group.categories_labels,
                     group.categories_text
                 ])
+    @csv_file
+    def dealers_publication_listing(self, out, session ):
+        out.writerow([
+            'Business Name',
+            'Description',
+            'URL',
+            'Location'
+        ])
+        dealer_groups = session.query(Group).filter(Group.tables > 0).all()
+        for group in dealer_groups:
+            if group.is_dealer and group.status_label == 'Approved':
+                out.writerow([
+                    group.name,
+                    group.description,
+                    group.website,
+                    group.location
+                ])
