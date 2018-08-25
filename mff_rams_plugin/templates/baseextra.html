@@ -32,9 +32,5 @@
             $("form[action*='lost_badge']").remove();
         }
 
-        $("input").each(function() {
-            $(this).prop('pattern','[^\u{1F600}-\u{1F6FF}]*').prop('title','No fields may contain emoji characters.');
-        });
-
     });
 </script>
