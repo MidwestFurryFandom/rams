@@ -156,28 +156,24 @@ class Root:
         }
 
     @csv_file
-    def all_dealers_detailed(self, out, session ):
+    def full_dealer_report(self, out, session ):
         out.writerow([
             'Business Name',
             'Dealer Name',
-            'Status',
-            'Description',
-            'URL',
-            'Point of Contact',
             'Email',
-            'Phone Number',
-            'Address1',
-            'Address2',
-            'City',
-            'State/Region',
-            'Zip Code',
-            'Country',
             'Tables',
-            'Amount Paid',
-            'Cost',
             'Badges',
+            'Status',
+            'Amount Paid',
+            'Website URL',
             'Wares',
-            'Wares - Other'
+            'Wares - Other',
+            'Description',
+            'Special Needs',
+            'Admin Notes',
+            'Power Reqeusted',
+            'Power Request Info',
+            'Location'
         ])
         dealer_groups = session.query(Group).filter(Group.tables > 0).all()
         for group in dealer_groups:
@@ -186,24 +182,20 @@ class Root:
                 out.writerow([
                     group.name,
                     full_name,
-                    group.status_label,
-                    group.description,
-                    group.website,
-                    group.leader.legal_name or group.leader.full_name,
                     group.leader.email,
-                    group.leader.cellphone,
-                    group.address1,
-                    group.address2,
-                    group.city,
-                    group.region,
-                    group.zip_code,
-                    group.country,
                     group.tables,
-                    group.amount_paid,
-                    group.cost,
                     group.badges,
+                    group.status_label,
+                    group.amount_paid,
+                    group.website,
                     group.categories_labels,
-                    group.categories_text
+                    group.categories_text,
+                    group.description,
+                    group.special_needs,
+                    group.admin_notes,
+                    group.power,
+                    group.power_usage,
+                    group.location
                 ])
     @csv_file
     def dealers_publication_listing(self, out, session ):
