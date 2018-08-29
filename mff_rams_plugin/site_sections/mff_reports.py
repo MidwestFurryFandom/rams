@@ -245,4 +245,38 @@ class Root:
                     group.leader.email,
                     group.tax_number
                 ])    
+    @csv_file
+    def dealers_application_review_report(self, out, session ):
+        out.writerow([
+            'Business Name',
+            'Dealer Name',
+            'Tables',
+            'Website URL',
+            'Email',
+            'Wares',
+            'Wares - Other',
+            'Description',
+            'Special Needs',
+            'Admin Notes',
+            'Power Reqeusted',
+            'Power Request Info'
+        ])
+        dealer_groups = session.query(Group).filter(Group.tables > 0).all()
+        for group in dealer_groups:
+            if group.is_dealer and group.status_label == 'Pending Approval':
+                full_name = group.leader.full_name if group.leader else ''
+                out.writerow([
+                    group.name,
+                    full_name,
+                    group.tables,
+                    group.website,
+                    group.leader.email,
+                    group.categories_labels,
+                    group.categories_text,
+                    group.description,
+                    group.special_needs,
+                    group.admin_notes,
+                    group.power,
+                    group.power_usage
+                ])
 
