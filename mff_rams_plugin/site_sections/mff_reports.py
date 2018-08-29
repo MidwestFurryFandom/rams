@@ -214,3 +214,35 @@ class Root:
                     group.website,
                     group.location
                 ])
+
+    @csv_file
+    def illinois_department_of_revenue_report(self, out, session ):
+        out.writerow([
+            'Business Name',
+            'Point of Contact',
+            'Street Address',
+            'Street Address (2)',
+            'City',
+            'Region',
+            'Zip',
+            'Country',
+            'Email',
+            'Tax Number'
+        ])
+        dealer_groups = session.query(Group).filter(Group.tables > 0).all()
+        for group in dealer_groups:
+            if group.is_dealer and group.status_label == 'Approved':
+                full_name = group.leader.full_name if group.leader else ''
+                out.writerow([
+                    group.name,
+                    full_name,
+                    group.address1,
+                    group.address2,
+                    group.city,
+                    group.region,
+                    group.zip_code,
+                    group.country,
+                    group.leader.email,
+                    group.tax_number
+                ])    
+
