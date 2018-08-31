@@ -10,6 +10,7 @@ c.include_plugin_config(config)
 c.MENU.append_menu_item(
     MenuItem(name='Midwest FurFest', access=c.PEOPLE, submenu=[
         MenuItem(name='Comped Badges', href='../mff_reports/comped_badges'),
+        MenuItem(name='Daily Attendance', href='../mff_reports/attendance_graph'),
         MenuItem(name='Print Adult Badges',
                  href='../kiosk_printing/print_badges'),
         MenuItem(name='Print Minor Badges',
