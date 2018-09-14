@@ -28,6 +28,11 @@ class Group:
     table_fee = Column(Integer, default=0)
     tax_number = Column(UnicodeText)
 
+    @presave_adjustment
+    def guest_groups_approved(self):
+        if self.leader and self.leader.badge_type == c.GUEST_BADGE and self.status == c.UNAPPROVED:
+            self.status = c.APPROVED
+
     @cost_property
     def power_cost(self):
         return self.power_fee if self.power_fee \
