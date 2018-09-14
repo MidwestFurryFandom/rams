@@ -3,7 +3,6 @@ import re
 from uber.decorators import prereg_validation, validation
 from uber.config import c
 from uber.model_checks import ignore_unassigned_and_placeholders
-from uber.models import Session
 
 
 @validation.Attendee
@@ -69,6 +68,11 @@ def power_usage(group):
     if group.power and not group.power_usage:
         return 'Please provide a list of what powered devices you ' \
                'expect to use.'
+
+@prereg_validation.Group
+def ibt_num(group):
+    if group.is_dealer and group.tax_number and not re.match("^[0-9-]*$", group.tax_number):
+        return 'Please use only numbers and hypens for your IBT number.'
 
 
 @prereg_validation.Group
