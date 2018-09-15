@@ -72,7 +72,7 @@ def power_usage(group):
 @prereg_validation.Group
 def ibt_num(group):
     if group.is_dealer and group.tax_number and not re.match("^[0-9-]*$", group.tax_number):
-        return 'Please use only numbers and hypens for your IBT number.'
+        return 'Please use only numbers and hyphens for your IBT number.'
 
 
 @prereg_validation.Group
