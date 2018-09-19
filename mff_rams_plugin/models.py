@@ -80,6 +80,11 @@ class Attendee:
     comped_reason = Column(UnicodeText, default='', admin_only=True)
 
     @presave_adjustment
+    def save_group_cost(self):
+        if self.group and self.group.auto_recalc:
+            self.group.cost = self.group.default_cost
+
+    @presave_adjustment
     def never_spam(self):
         self.can_spam = False
 
