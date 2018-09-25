@@ -38,6 +38,11 @@ class Group:
     table_fee = Column(Integer, default=0)
     tax_number = Column(UnicodeText)
 
+    @presave_adjustment
+    def guest_groups_approved(self):
+        if self.leader and self.leader.badge_type == c.GUEST_BADGE and self.status == c.UNAPPROVED:
+            self.status = c.APPROVED
+
     @cost_property
     def power_cost(self):
         return self.power_fee if self.power_fee \
@@ -83,6 +88,11 @@ class Group:
 @Session.model_mixin
 class Attendee:
     comped_reason = Column(UnicodeText, default='', admin_only=True)
+
+    @presave_adjustment
+    def save_group_cost(self):
+        if self.group and self.group.auto_recalc:
+            self.group.cost = self.group.default_cost
 
     @presave_adjustment
     def never_spam(self):
