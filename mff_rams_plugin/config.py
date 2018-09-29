@@ -11,8 +11,12 @@ c.MENU.append_menu_item(
     MenuItem(name='Midwest FurFest', access=c.PEOPLE, submenu=[
         MenuItem(name='Comped Badges', href='../mff_reports/comped_badges'),
         MenuItem(name='Daily Attendance', href='../mff_reports/attendance_graph'),
-        MenuItem(name='Print Adult Badges',
+        MenuItem(name='Print Adult Badges (Single Queue)',
                  href='../kiosk_printing/print_badges'),
+        MenuItem(name='Print Adult Badges (Even Queue)',
+                 href='../kiosk_printing/print_badges?evenOdd=e'),
+        MenuItem(name='Print Adult Badges (Odd Queue)',
+                 href='../kiosk_printing/print_badges?evenOdd=o'),
         MenuItem(name='Print Minor Badges',
                  href='../kiosk_printing/print_badges?minor=True'),
     ])
