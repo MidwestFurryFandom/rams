@@ -12,7 +12,7 @@ You ({{ attendee.full_name }}) have preregistered for {{ c.EVENT_NAME }} at the 
 Your registration confirmation number is {{ attendee.id }}. You can update your contact information, change your badge name, or upgrade you registration level by clicking <a href="{{ c.URL_BASE }}/preregistration/confirm?id={{ attendee.id }}">here</a>.
 <br/> <br/>
 
-Badges are not mailed out before the event, so your badge will be available for pickup at registration when you arrive at {{ c.EVENT_NAME }}.  Simply bring a photo ID to registration, where you can pick up your badge. Location and hours of registration will be announced at a later date on our website and social media.
+Badges are not mailed out before the event, so your badge will be available for pickup at {% if attendee.group %}the Dealers Den Operations table{% else %}registration{% endif %} when you arrive at {{ c.EVENT_NAME }}.  Simply bring a photo ID to {% if attendee.group %}the Dealers Den Operations table outside the Dealers Den{% else %}registration{% endif %}, where you can pick up your badge. {% if not attendee.group %} Location and hours of registration will be announced at a later date on our website and social media. {% endif %}
 
 
 {% include "emails/reg_workflow/reg_notes.html" %}
