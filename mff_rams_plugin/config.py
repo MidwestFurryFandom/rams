@@ -1,7 +1,7 @@
 from sideboard.lib import parse_config
 from collections import defaultdict
 
-from uber.config import c, Config
+from uber.config import c, Config, dynamic
 from uber.menu import MenuItem
 
 config = parse_config(__file__)
