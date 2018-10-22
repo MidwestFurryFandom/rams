@@ -55,3 +55,36 @@ class ExtraConfig:
     @property
     def DEALER_POWER_OPTS(self):
         return [(0, 'No power'), (1, 'Default power')]
+
+    @property
+    @dynamic
+    def AT_THE_DOOR_BADGE_OPTS(self):
+        """
+        This provides the dropdown on the /registration/register page with its
+        list of badges available at-door.  It includes a "Full Weekend Badge"
+        if attendee badges are available.  If one-days are enabled, it includes
+        either a generic "Single Day Badge" or a list of specific day badges,
+        based on the c.PRESELL_ONE_DAYS setting.
+        """
+        opts = []
+        if self.ATTENDEE_BADGE_AVAILABLE:
+            opts.append((self.ATTENDEE_BADGE, 'Full Weekend Badge (${})'.format(self.BADGE_PRICE)))
+        if self.SHINY_BADGE_AVAILABLE and c.SHINY_BADGE not in opts:
+            opts.append(
+                (c.SHINY_BADGE, '{} (${})'.format(self.BADGES[c.SHINY_BADGE], self.BADGE_TYPE_PRICES[c.SHINY_BADGE])))
+        if self.SPONSOR_BADGE_AVAILABLE and c.SPONSOR_BADGE not in opts:
+            opts.append((c.SPONSOR_BADGE,
+                         '{} (${})'.format(self.BADGES[c.SPONSOR_BADGE], self.BADGE_TYPE_PRICES[c.SPONSOR_BADGE])))
+        if self.ONE_DAYS_ENABLED:
+            if self.PRESELL_ONE_DAYS:
+                day = max(uber.utils.localized_now(), self.EPOCH)
+                while day.date() <= self.ESCHATON.date():
+                    day_name = day.strftime('%A')
+                    price = self.BADGE_PRICES['single_day'].get(day_name) or self.DEFAULT_SINGLE_DAY
+                    badge = getattr(self, day_name.upper())
+                    if getattr(self, day_name.upper() + '_AVAILABLE', None):
+                        opts.append((badge, day_name + ' Badge (${})'.format(price)))
+                    day += timedelta(days=1)
+            elif self.ONE_DAY_BADGE_AVAILABLE:
+                opts.append((self.ONE_DAY_BADGE, 'Single Day Badge (${})'.format(self.ONEDAY_BADGE_PRICE)))
+        return opts
