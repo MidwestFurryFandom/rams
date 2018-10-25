@@ -1,8 +1,10 @@
 from sideboard.lib import parse_config
 from collections import defaultdict
+from datetime import timedelta
 
 from uber.config import c, Config, dynamic
 from uber.menu import MenuItem
+from uber.utils import localized_now
 
 config = parse_config(__file__)
 c.include_plugin_config(config)
@@ -77,7 +79,7 @@ class ExtraConfig:
                          '{} (${})'.format(self.BADGES[c.SPONSOR_BADGE], self.BADGE_TYPE_PRICES[c.SPONSOR_BADGE])))
         if self.ONE_DAYS_ENABLED:
             if self.PRESELL_ONE_DAYS:
-                day = max(uber.utils.localized_now(), self.EPOCH)
+                day = max(localized_now(), self.EPOCH)
                 while day.date() <= self.ESCHATON.date():
                     day_name = day.strftime('%A')
                     price = self.BADGE_PRICES['single_day'].get(day_name) or self.DEFAULT_SINGLE_DAY
