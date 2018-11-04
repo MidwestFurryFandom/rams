@@ -227,6 +227,7 @@ class Root:
             'Zip',
             'Country',
             'Email',
+            'Phone Number',
             'Tax Number'
         ])
         dealer_groups = session.query(Group).filter(Group.tables > 0).all()
@@ -243,6 +244,7 @@ class Root:
                     group.zip_code,
                     group.country,
                     group.leader.email,
+                    group.leader.cellphone,
                     group.tax_number
                 ])    
     @csv_file
