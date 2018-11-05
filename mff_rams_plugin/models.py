@@ -117,7 +117,7 @@ class Attendee:
         elif self.badge_type == c.ONE_DAY_BADGE:
             return c.get_oneday_price(registered)
         elif self.is_presold_oneday:
-            return c.get_presold_oneday_price(self.badge_type)
+            return max(0, c.get_presold_oneday_price(self.badge_type) + self.age_discount)
         if self.badge_type in c.BADGE_TYPE_PRICES:
             return int(c.BADGE_TYPE_PRICES[self.badge_type])
         elif self.age_discount != 0:
@@ -131,9 +131,11 @@ class Attendee:
                 and self.age_group_conf['val'] == c.UNDER_13 \
                 and c.AT_THE_CON:
             if self.badge_type == c.ATTENDEE_BADGE:
-                discount = 30
-            elif self.badge_type in [c.FRIDAY, c.SATURDAY, c.SUNDAY]:
-                discount = 10
+                discount = 33
+            elif self.badge_type in [c.FRIDAY, c.SUNDAY]:
+                discount = 13
+            elif self.badge_type == c.SATURDAY:
+                discount = 20
             if not self.age_group_conf['discount'] \
                     or self.age_group_conf['discount'] < discount:
                 return -discount
