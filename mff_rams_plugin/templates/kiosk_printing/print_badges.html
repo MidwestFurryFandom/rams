@@ -92,7 +92,7 @@ body {margin: 0; padding: 0;}
 }
     </style>
 </head>
-<body>
+<body onload="window.print();">
 {% if badge_type == "Attendee" %}{% set badge_type = "Standard" %}
 {% elif badge_type == "Shiny Sponsor" %}{% set badge_type = "Shiny" %}{% endif %}
     <div id="container">
@@ -119,9 +119,5 @@ Sunday&nbsp;&nbsp;
           <span id="badge_type">{{ badge_type|safe }}</span>
         </div>
     </div>
-   	<script>
-    	// Print called here to make sure page loads
-        window.print();
-	</script>
 </body>
 </html>
