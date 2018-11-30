@@ -103,6 +103,14 @@ class Attendee:
                     and self.ribbon != c.STAFF_RIBBON:
                 self.print_pending = True
 
+    @presave_adjustment
+    def reprint_prereg_name_change(self):
+        if self.times_printed >= 1 and not self.orig_value_of('checked_in') and \
+                        self.orig_value_of('badge_printed_name') != self.badge_printed_name:
+            self.print_pending = True
+            self.for_review += "Automated message: Badge marked for free reprint " \
+                               "because we think this is a preregistered attendee who wanted a different badge name."
+
     @cost_property
     def badge_cost(self):
         registered = self.registered_local if self.registered else None
