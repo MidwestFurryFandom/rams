@@ -147,6 +147,21 @@ class Root:
             'show': show
         }
 
+    def sponsors_counts(self, session):
+        sponsors = session.query(Attendee).filter(Attendee.badge_type == c.SPONSOR_BADGE)
+        shiny_sponsors = session.query(Attendee).filter(Attendee.badge_type == c.SHINY_BADGE)
+        sponsor_counts = {}
+        shiny_counts = {}
+
+        for val, desc in c.BADGE_STATUS_OPTS:
+            sponsor_counts[desc] = sponsors.filter(Attendee.badge_status == val).count()
+            shiny_counts[desc] = shiny_sponsors.filter(Attendee.badge_status == val).count()
+
+        return {
+            'sponsor_counts': sponsor_counts,
+            'shiny_counts': shiny_counts,
+        }
+
     def attendance_graph(self, session):
         graph_data_current_year = RegistrationDataOneYear()
         graph_data_current_year.query_current_year(session)
