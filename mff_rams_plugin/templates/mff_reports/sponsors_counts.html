@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% set admin_area=True %}
+{% block title %}Sponsors and Shiny Sponsors by Badge Type{% endblock %}
+{% block content %}
+
+<h3>Sponsors by Badge Status</h3>
+<ul>
+    {% for desc, count in sponsor_counts.items() %}
+        <li><i>{{ desc }}:</i> {{ count }}</li>
+    {% endfor %}
+  <li><strong>Badge Stock:</strong> {{ c.SPONSOR_BADGE_STOCK }}</li>
+</ul>
+
+<h3>Shiny Sponsors by Badge Status</h3>
+<ul>
+    {% for desc, count in shiny_counts.items() %}
+        <li><i>{{ desc }}:</i> {{ count }}</li>
+    {% endfor %}
+    <li><strong>Badge Stock:</strong> {{ c.SHINY_BADGE_STOCK }}</li>
+</ul>
+{% endblock %}
