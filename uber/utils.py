@@ -190,6 +190,24 @@ def url_domain(url):
     return url.split('/', 1)[0].strip('@#?=. ')
 
 
+def extract_urls(text):
+    """
+    Extract all URLs from a block of text and returns them in a list.
+    Designed for use with attendee-submitted URLs, e.g., URLs inside
+    seller application fields.
+
+    This is a simplified version of https://stackoverflow.com/a/50790119.
+    We don't look for IP addresses of any kind, and we assume that
+    attendees put whitespace after each URL so we can match complex
+    resources paths with a wide variety of characters.
+    """
+    if not text:
+        return
+
+    regex=r"\b((?:https?:\/\/)?(?:(?:www\.)?(?:[\da-z\.-]+)\.(?:[a-z]{2,6}))(?::[0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])?(?:\/\S*)*\/?)\b"
+    return re.findall(regex, text, re.IGNORECASE)
+
+
 def create_valid_user_supplied_redirect_url(url, default_url):
     """
     Create a valid redirect from user-supplied data.
@@ -562,6 +580,8 @@ def check(model, *, prereg=False):
         for validator in v[model.__class__.__name__].values():
             message = validator(model)
             if message:
+                if isinstance(message, tuple):
+                    message = message[1]
                 errors.append(message)
     return "ERROR: " + "<br>".join(errors) if errors else None
 
@@ -600,45 +620,43 @@ def check_pii_consent(params, attendee=None):
     return ''
 
 
-def validate_model(forms, model, preview_model=None, extra_validators_module=None, is_admin=False):
+def validate_model(forms, model, preview_model=None, is_admin=False):
     from wtforms import validators
-    from wtforms.validators import ValidationError, StopValidation
 
     all_errors = defaultdict(list)
     
     if not preview_model:
         preview_model = model
     else:
-        for module in forms.values():
-            module.populate_obj(preview_model) # We need a populated model BEFORE we get its optional fields below
+        for form in forms.values():
+            form.populate_obj(preview_model) # We need a populated model BEFORE we get its optional fields below
 
-    for module in forms.values():
+    for form in forms.values():
         extra_validators = defaultdict(list)
-        for field_name in module.get_optional_fields(preview_model, is_admin):
-            field = getattr(module, field_name)
+        for field_name in form.get_optional_fields(preview_model, is_admin):
+            field = getattr(form, field_name)
             if field:
-                field.validators = [validators.Optional()]
+                field.validators = [validators.Optional()] + [validator for validator in field.validators if not isinstance(validator, (validators.DataRequired, validators.InputRequired))]
 
-        if extra_validators_module:
-            for key, field in module.field_list:
-                extra_validators[key].extend(extra_validators_module.form_validation.get_validations_by_field(key))
-                if field and (model.is_new or getattr(model, key, None) != field.data):
-                    extra_validators[key].extend(extra_validators_module.new_or_changed_validation.get_validations_by_field(key))
-
-        valid = module.validate(extra_validators=extra_validators)
+        # TODO: Do we need to check for custom validations or is this code performant enough to skip that?
+        for key, field in form.field_list:
+            extra_validators[key].extend(form.field_validation.get_validations_by_field(key))
+            if field and (model.is_new or getattr(model, key, None) != field.data):
+                extra_validators[key].extend(form.new_or_changed_validation.get_validations_by_field(key))
+        valid = form.validate(extra_validators=extra_validators)
         if not valid:
-            for key, val in module.errors.items():
+            for key, val in form.errors.items():
                 all_errors[key].extend(map(str, val))
 
-    if extra_validators_module:
-        for key, val in extra_validators_module.post_form_validation.get_validation_dict().items():
-            for func in val:
-                try:
-                    func(preview_model)
-                except (ValidationError, StopValidation) as e:
-                    all_errors[key].append(str(e))
-                    if isinstance(e, StopValidation):
-                        break
+    validations = [uber.model_checks.validation.validations]
+    prereg_validations = [uber.model_checks.prereg_validation.validations] if not is_admin else []
+    for v in validations + prereg_validations:
+        for validator in v[model.__class__.__name__].values():
+            error = validator(preview_model)
+            if error and isinstance(error, tuple):
+                all_errors[error[0]].append(error[1])
+            elif error:
+                all_errors[''].append(error)
 
     if all_errors:
         return all_errors
@@ -711,8 +729,11 @@ def redirect_to_allowed_dept(session, department_id, page):
             raise HTTPRedirect('{}?department_id={}', page, c.DEFAULT_DEPARTMENT_ID)
         return
 
+    if department_id == None and c.DEFAULT_DEPARTMENT_ID and len(c.ADMIN_DEPARTMENTS) < 5:
+        raise HTTPRedirect('{}?department_id={}', page, c.DEFAULT_DEPARTMENT_ID)
+
     if not department_id:
-        raise HTTPRedirect('{}?department_id=All', page, department_id)
+        raise HTTPRedirect('{}?department_id=None', page)
     if 'shifts_admin' in c.PAGE_PATH:
         can_access = session.admin_attendee().can_admin_shifts_for(department_id)
     elif 'dept_checklist' in c.PAGE_PATH:
@@ -911,14 +932,15 @@ def remove_opt(opts, other):
 def _server_to_url(server):
     if not server:
         return ''
+    protocol = 'https' if 'https' in server or 'http' not in server else 'http'
     host, _, path = urllib.parse.unquote(server).replace('http://', '').replace('https://', '').rstrip('/').partition('/')
     if path.startswith('reggie'):
-        return 'https://{}/reggie'.format(host)
+        return f'{protocol}://{host}/reggie'
     elif path.startswith('uber'):
-        return 'https://{}/uber'.format(host)
+        return f'{protocol}://{host}/uber'
     elif path in ['uber', 'rams']:
-        return 'https://{}/{}'.format(host, path)
-    return 'https://{}'.format(host)
+        f'{protocol}://{host}/{path}'
+    return f'{protocol}://{host}'
 
 
 def _server_to_host(server):
@@ -942,6 +964,8 @@ def get_api_service_from_server(target_server, api_token):
     Helper method that gets a service that can be used for API calls between servers.
     Returns the service or None, an error message or '', and a JSON-RPC URI
     """
+    import ssl
+
     target_url, target_host, remote_api_token = _format_import_params(target_server, api_token)
     uri = '{}/jsonrpc/'.format(target_url)
 
@@ -953,7 +977,7 @@ def get_api_service_from_server(target_server, api_token):
             message = 'Unrecognized hostname: {}'.format(target_server)
 
         if not message:
-            service = ServerProxy(uri=uri, extra_headers={'X-Auth-Token': remote_api_token})
+            service = ServerProxy(uri=uri, extra_headers={'X-Auth-Token': remote_api_token}, ssl_opts={'ssl_version': ssl.PROTOCOL_SSLv23})
 
     return service, message, target_url
 
@@ -1103,11 +1127,37 @@ class OAuthRequest:
                     self.redirect_uri + "process_logout")
 
 
-class SignNowDocument:    
-    def __init__(self):
+class SignNowRequest:    
+    def __init__(self, session, group=None, ident='', create_if_none=False):
+        self.group = group
+        self.group_leader_name = ''
+        self.document = None
         self.access_token = None
         self.error_message = ''
+
         self.set_access_token()
+        if self.error_message:
+            log.error(self.error_message)
+            return
+
+        from uber.models import SignedDocument
+
+        if group:
+            self.document = session.query(SignedDocument).filter_by(model="Group", fk_id=group.id).first()
+        
+            if not self.document and create_if_none:
+                self.document = SignedDocument(fk_id=group.id, model="Group", ident=ident)
+                first_name = group.leader.first_name if group.leader else ''
+                last_name = group.leader.last_name if group.leader else ''
+                self.group_leader_name = first_name + ' ' + last_name
+            
+            if self.document and not self.document.document_id:
+                self.document.document_id = self.create_document(
+                    template_id=c.SIGNNOW_DEALER_TEMPLATE_ID,
+                    doc_title="MFF {} Dealer Terms - {}".format(c.EVENT_YEAR, group.name),
+                    folder_id=c.SIGNNOW_DEALER_FOLDER_ID,
+                    uneditable_texts_list=group.signnow_texts_list,
+                    fields={} if c.SIGNNOW_ENV == 'eval' else {'printed_name': self.group_leader_name})
 
     @property
     def api_call_headers(self):
@@ -1144,9 +1194,6 @@ class SignNowDocument:
             self.access_token = c.SIGNNOW_ACCESS_TOKEN
             return
 
-        if self.error_message:
-            log.error(self.error_message)
-
     def create_document(self, template_id, doc_title, folder_id='', uneditable_texts_list=None, fields={}):
         from requests import post, put
         from json import dumps, loads
@@ -1157,7 +1204,6 @@ class SignNowDocument:
         
             if 'error' in document_request:
                 self.error_message = "Error creating document from template with token {}: {}".format(self.access_token, document_request['error'])
-                return None
 
         if self.error_message:
             return None
@@ -1182,7 +1228,7 @@ class SignNowDocument:
                 fields_request = response.json()
 
                 if 'errors' in fields_request:
-                    self.error_message = "Error setting up text fields: " + '; '.join([e['message'] for e in fields_request['errors']])
+                    self.error_message = "Error setting up fields: " + '; '.join([e['message'] for e in fields_request['errors']])
                     return None
 
         if folder_id:
@@ -1195,7 +1241,34 @@ class SignNowDocument:
         
         return document_request.get('id')
     
-    def get_signing_link(self, document_id, first_name="", last_name="", redirect_uri=""):
+    def get_doc_signed_timestamp(self):
+        if not self.document:
+            self.error_message = "Tried to get a signed timestamp without a document attached to the request!"
+            return
+        
+        details = self.get_document_details()
+        if details and details.get('signatures'):
+            return details['signatures'][0].get('created')
+
+    def create_dealer_signing_link(self):
+        if not self.group:
+            self.error_message = "Tried to send a dealer signing link without a group attached to the request!"
+            return
+        if not self.document:
+            self.error_message = "Tried to send a dealer signing link without a document attached to the request!"
+            return
+
+        first_name = self.group.leader.first_name if self.group.leader else ''
+        last_name = self.group.leader.last_name if self.group.leader else ''
+
+        if self.document.document_id and not self.document.signed:
+            link = self.get_signing_link(first_name,
+                                         last_name,
+                                         (c.REDIRECT_URL_BASE or c.URL_BASE) + '/preregistration/group_members?id={}'
+                                         .format(self.group.id))
+            return link
+    
+    def get_signing_link(self, first_name="", last_name="", redirect_uri=""):
         from requests import post
         from json import dumps, loads
 
@@ -1209,11 +1282,13 @@ class SignNowDocument:
             dict: A dictionary representing the JSON response containing the signing links for the document.
         """
 
-        self.set_access_token(refresh=True)
+        if not self.document:
+            self.error_message = "Tried to send a signing link without a document attached to the request!"
+            return
 
         response = post(signnow_sdk.Config().get_base_url() + '/link', headers=self.api_call_headers,
         data=dumps({
-            "document_id": document_id,
+            "document_id": self.document.document_id,
             "firstname": first_name,
             "lastname": last_name,
             "redirect_uri": redirect_uri
@@ -1224,44 +1299,49 @@ class SignNowDocument:
         else:
             return signing_request.get('url_no_signup')
 
-    def send_signing_invite(self, document_id, group, name):
-        self.set_access_token(refresh=True)
+    def send_dealer_signing_invite(self):
+        from uber.custom_tags import email_only
+        if not self.group:
+            self.error_message = "Tried to send a dealer signing invite without a group attached to the request!"
+            return
 
         invite_payload = {
             "to": [
-                { "email": group.email, "prefill_signature_name": name, "role_id": "", "role": "Signer", "order": 1 }
+                { "email": self.group.email, "prefill_signature_name": self.group_leader_name, "role": "Dealer", "order": 1 }
             ],
-            "from": c.MARKETPLACE_EMAIL,
+            "from": email_only(c.MARKETPLACE_EMAIL),
             "cc": [],
             "subject": "ACTION REQUIRED: {} {} Terms and Conditions".format(c.EVENT_NAME, c.DEALER_TERM.title()),
-            "message": "Congratulations on being accepted into the {} {}! Please click the button below to review and sign \
-                        the terms and conditions. You MUST sign this in order to complete your registration.".format(
+            "message": "Congratulations on being accepted into the {} {}! Please click the button below to review and sign the terms and conditions. You MUST sign this in order to complete your registration.".format(
                         c.EVENT_NAME, c.DEALER_LOC_TERM.title()),
-            "redirect_uri": "{}/preregistration/group_members?id={}&message={}".format(c.REDIRECT_URL_BASE or c.URL_BASE, group.id, 
-                                                                                       "Thanks for signing! Please pay your application fee below.")
+            "redirect_uri": "{}/preregistration/group_members?id={}".format(c.REDIRECT_URL_BASE or c.URL_BASE, self.group.id)
             }
-        
-        log.debug(str(invite_payload))
 
-        invite_request = signnow_sdk.Document.invite(self.access_token, document_id, invite_payload)
+        invite_request = signnow_sdk.Document.invite(self.access_token, self.document.document_id, invite_payload)
 
         if 'error' in invite_request:
             self.error_message = "Error sending invite to sign: " + invite_request['error']
         else:
             return invite_request
 
-    def get_download_link(self, document_id):
-        self.set_access_token(refresh=True)
-        download_request = signnow_sdk.Document.download_link(self.access_token, document_id)
+    def get_download_link(self):
+        if not self.document:
+            self.error_message = "Tried to get a download link from a request without a document!"
+            return
+
+        download_request = signnow_sdk.Document.download_link(self.access_token, self.document.document_id)
 
         if 'error' in download_request:
             self.error_message = "Error getting download link: " + download_request['error']
         else:
             return download_request.get('link')
     
-    def get_document_details(self, document_id):
-        self.set_access_token(refresh=True)
-        document_request = signnow_sdk.Document.get(self.access_token, document_id)
+    def get_document_details(self):
+        if not self.document:
+            self.error_message = "Tried to get document details from a request without a document!"
+            return
+
+        document_request = signnow_sdk.Document.get(self.access_token, self.document.document_id)
 
         if 'error' in document_request:
             self.error_message = "Error getting document: " + document_request['error']
@@ -1528,7 +1608,7 @@ class TaskUtils:
                             new_staff.managers.append(account)
                             session.add(new_staff)
                     # If SSO is used for attendee accounts, we don't import staff at all
-                elif attendee['badge_status'] not in [c.PENDING_STATUS, c.INVALID_STATUS, 
+                elif attendee['badge_status'] not in [c.PENDING_STATUS, c.AT_DOOR_PENDING_STATUS, c.INVALID_STATUS, 
                                                       c.IMPORTED_STATUS, c.INVALID_GROUP_STATUS]: # Workaround for a bug in the export, we can remove this check next year
                     new_attendee = TaskUtils.basic_attendee_import(attendee)
                     new_attendee.paid = c.NOT_PAID

@@ -65,6 +65,13 @@ class Group(MagModel, TakesPaymentMixin):
     leader = relationship('Attendee', foreign_keys=leader_id, post_update=True, cascade='all')
     studio = relationship('IndieStudio', uselist=False, backref='group')
     guest = relationship('GuestGroup', backref='group', uselist=False)
+    active_receipt = relationship(
+        'ModelReceipt',
+        cascade='save-update,merge,refresh-expire,expunge',
+        primaryjoin='and_(remote(ModelReceipt.owner_id) == foreign(Group.id),'
+                        'ModelReceipt.owner_model == "Group",'
+                        'ModelReceipt.closed == None)',
+        uselist=False)
 
     _repr_attr_names = ['name']
 
@@ -74,12 +81,12 @@ class Group(MagModel, TakesPaymentMixin):
         if len(assigned) == 1:
             [self.leader] = assigned
         if self.auto_recalc:
-            self.cost = self.default_cost
+            self.cost = self.calc_default_cost()
         elif not self.cost:
             self.cost = 0
         if self.status == c.APPROVED and not self.approved:
             self.approved = datetime.now(UTC)
-        if self.leader and self.is_dealer:
+        if self.leader and self.is_dealer and self.leader.paid == c.PAID_BY_GROUP:
             self.leader.ribbon = add_opt(self.leader.ribbon_ints, c.DEALER_RIBBON)
         if not self.is_unpaid or self.orig_value_of('status') != self.status:
             for a in self.attendees:
@@ -104,13 +111,17 @@ class Group(MagModel, TakesPaymentMixin):
             return self.current_badge_cost * 100, self.new_badge_cost * num_new_badges * 100
 
         if not new_cost:
-            new_cost = int(preview_group.default_cost * 100)
+            new_cost = int(preview_group.calc_default_cost() * 100)
         return current_cost, new_cost - current_cost
                 
     @presave_adjustment
     def assign_creator(self):
         if self.is_new and not self.creator_id:
             self.creator_id = self.session.admin_attendee().id if self.session.admin_attendee() else None
+
+    @hybrid_property
+    def cost_cents(self):
+        return self.cost * 100
     
     @property
     def signnow_texts_list(self):
@@ -217,16 +228,11 @@ class Group(MagModel, TakesPaymentMixin):
 
     @hybrid_property
     def is_dealer(self):
-        return bool(
-            self.tables
-            and self.tables != '0'
-            and self.tables != '0.0'
-            and (not self.registered or self.cost
-                or self.status != c.UNAPPROVED))
+        return bool(not self.guest and (self.tables or self.cost or self.status not in [c.IMPORTED, c.UNAPPROVED]))
 
     @is_dealer.expression
     def is_dealer(cls):
-        return and_(cls.tables > 0, or_(cls.cost > 0, cls.status != c.UNAPPROVED))
+        return and_(cls.guest == None, or_(cls.tables > 0, cls.cost > 0, not_(cls.status.in_([c.IMPORTED, c.UNAPPROVED]))))
 
     @hybrid_property
     def is_unpaid(self):
@@ -259,7 +265,8 @@ class Group(MagModel, TakesPaymentMixin):
     @badges_purchased.expression
     def badges_purchased(cls):
         from uber.models import Attendee
-        return exists().where(and_(Attendee.group_id == cls.id, Attendee.paid == c.PAID_BY_GROUP))
+        return select([func.count(Attendee.id)]
+                      ).where(and_(Attendee.group_id == cls.id, Attendee.paid == c.PAID_BY_GROUP)).label('badges_purchased')
 
     @property
     def badges(self):
@@ -287,7 +294,6 @@ class Group(MagModel, TakesPaymentMixin):
 
         return total_badge_cost
 
-
     @property
     def new_badge_cost(self):
         return c.DEALER_BADGE_PRICE if self.is_dealer else c.get_group_price()
@@ -305,24 +311,12 @@ class Group(MagModel, TakesPaymentMixin):
             return 0
 
         if self.active_receipt:
-            return self.active_receipt['item_total'] / 100
-        return self.default_cost + self.amount_extra
-    
-    @hybrid_property
-    def has_receipt(self):
-        return self.active_receipt
-    
-    @has_receipt.expression
-    def has_receipt(cls):
-        from uber.models import ModelReceipt
-        return exists().select_from(ModelReceipt).where(
-            and_(ModelReceipt.owner_id == cls.id,
-                 ModelReceipt.owner_model == "Group",
-                 ModelReceipt.closed == None))
+            return self.active_receipt.item_total / 100
+        return (self.cost or self.calc_default_cost()) + self.amount_extra
 
     @hybrid_property
     def is_paid(self):
-        return self.active_receipt.get('current_amount_owed', None) == 0
+        return self.active_receipt and self.active_receipt.current_amount_owed == 0
     
     @is_paid.expression
     def is_paid(cls):
@@ -336,14 +330,17 @@ class Group(MagModel, TakesPaymentMixin):
 
     @property
     def amount_unpaid(self):
+        if self.is_dealer and self.status != c.APPROVED:
+            return 0
+
         if self.registered:
-            return max(0, ((self.total_cost * 100) - self.amount_paid - self.amount_pending) / 100)
+            return max(0, ((self.total_cost * 100) - self.amount_paid) / 100)
         else:
             return self.total_cost
 
     @property
     def amount_pending(self):
-        return self.active_receipt.get('pending_total', 0)
+        return self.active_receipt.pending_total if self.active_receipt else 0
 
     @property
     def amount_paid_repr(self):
@@ -355,7 +352,7 @@ class Group(MagModel, TakesPaymentMixin):
 
     @hybrid_property
     def amount_paid(self):
-        return self.active_receipt.get('payment_total', 0)
+        return self.active_receipt.payment_total if self.active_receipt else 0
     
     @amount_paid.expression
     def amount_paid(cls):
@@ -369,7 +366,7 @@ class Group(MagModel, TakesPaymentMixin):
     
     @hybrid_property
     def amount_refunded(self):
-        return self.active_receipt.get('refund_total', 0)
+        return self.active_receipt.refund_total if self.active_receipt else 0
     
     @amount_refunded.expression
     def amount_refunded(cls):

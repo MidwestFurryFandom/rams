@@ -2,6 +2,9 @@ from itertools import chain
 from uber.models.attendee import AttendeeAccount
 
 import cherrypy
+import json
+import re
+from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
 from pockets import groupify
@@ -12,20 +15,22 @@ from sqlalchemy.orm import joinedload, raiseload, subqueryload
 from sqlalchemy.orm.exc import NoResultFound
 
 from uber.config import c, _config
-from uber.custom_tags import datetime_local_filter, pluralize, format_currency
+from uber.custom_tags import datetime_local_filter, pluralize, format_currency, readable_join
 from uber.decorators import ajax, all_renderable, csv_file, not_site_mappable, site_mappable
 from uber.errors import HTTPRedirect
-from uber.models import AdminAccount, ApiJob, ArtShowApplication, Attendee, Group, ModelReceipt, ReceiptItem, ReceiptTransaction, Tracking
+from uber.models import AdminAccount, ApiJob, ArtShowApplication, Attendee, Group, ModelReceipt, ReceiptItem, ReceiptTransaction, \
+    Tracking, WorkstationAssignment
 from uber.site_sections import devtools
 from uber.utils import check, get_api_service_from_server, normalize_email, normalize_email_legacy, valid_email, TaskUtils
-from uber.payments import ReceiptManager, TransactionRequest
+from uber.payments import ReceiptManager, TransactionRequest, SpinTerminalRequest
 
 def check_custom_receipt_item_txn(params, is_txn=False):
+    from decimal import Decimal
     if not params.get('amount'):
         return "You must enter a positive or negative amount."
     
     try:
-        amount = int(params['amount'])
+        amount = Decimal(params['amount'])
     except Exception:
         return "The amount must be a number."
 
@@ -37,7 +42,7 @@ def check_custom_receipt_item_txn(params, is_txn=False):
     if is_txn:
         if not params.get('method'):
             return "You must choose a payment method."
-        if int(params['amount']) < 0 and not params.get('desc'):
+        if Decimal(params['amount']) < 0 and not params.get('desc'):
             return "You must enter a description when adding a refund."
     elif not params.get('desc'):
         return "You must describe the item you are adding or crediting."
@@ -89,8 +94,17 @@ def assign_account_by_email(session, attendee, account_email):
 @all_renderable()
 class Root:
     def receipt_items(self, session, id, message=''):
+        group_leader_receipt = None
+        group_processing_fee = 0
         try:
             model = session.attendee(id)
+            if model.in_promo_code_group and model.promo_code.group.buyer:
+                group_leader_receipt = session.get_receipt_by_model(model.promo_code.group.buyer)
+                potential_refund_amount = model.promo_code.cost * 100
+                if group_leader_receipt:
+                    txn = sorted([txn for txn in group_leader_receipt.refundable_txns if txn.amount_left >= potential_refund_amount],
+                                    key=lambda x: x.added)[0]
+                    group_processing_fee = txn.calc_processing_fee(potential_refund_amount)
         except NoResultFound:
             try:
                 model = session.group(id)
@@ -121,12 +135,17 @@ class Root:
             'attendee': model if isinstance(model, Attendee) else None,
             'group': model if isinstance(model, Group) else None,
             'art_show_app': model if isinstance(model, ArtShowApplication) else None,
+            'group_leader_receipt': group_leader_receipt,
+            'group_processing_fee': group_processing_fee,
             'receipt': receipt,
             'other_receipts': other_receipts,
             'closed_receipts': session.query(ModelReceipt).filter(ModelReceipt.owner_id == id,
                                                                   ModelReceipt.owner_model == model.__class__.__name__,
                                                                   ModelReceipt.closed != None).all(),
             'message': message,
+            'processors': {
+                c.STRIPE: "Authorize.net" if c.AUTHORIZENET_LOGIN_ID else "Stripe",
+                c.SQUARE: "SPIn" if c.SPIN_TERMINAL_AUTH_KEY else "Square"}
         }
 
     def create_receipt(self, session, id='', blank=False):
@@ -144,13 +163,15 @@ class Root:
 
     @ajax
     def add_receipt_item(self, session, id='', **params):
+        from decimal import Decimal
+
         receipt = session.model_receipt(id)
 
         message = check_custom_receipt_item_txn(params)
         if message:
             return {'error': message}
 
-        amount = int(params.get('amount', 0))
+        amount = Decimal(params.get('amount', 0))
 
         if params.get('item_type', '') == 'credit':
             amount = amount * -1
@@ -232,7 +253,12 @@ class Root:
         item = session.receipt_item(id)
         
         if item.receipt_txn and item.receipt_txn.amount_left:
-            refund = TransactionRequest(item.receipt, amount=min(item.amount, item.receipt_txn.amount_left))
+            refund_amount = min(item.amount * item.count, item.receipt_txn.amount_left)
+            if item.receipt_txn.method == c.SQUARE and c.SPIN_TERMINAL_AUTH_KEY:
+                refund = SpinTerminalRequest(receipt=item.receipt, amount=refund_amount, method=item.receipt_txn.method)
+            else:
+                refund = TransactionRequest(receipt=item.receipt, amount=refund_amount, method=item.receipt_txn.method)
+
             error = refund.refund_or_cancel(item.receipt_txn)
             if error:
                 return {'error': error}
@@ -241,6 +267,27 @@ class Root:
             if isinstance(model, Attendee) and model.paid == c.HAS_PAID:
                 model.paid = c.REFUNDED
                 session.merge(model)
+
+            if refund.refund_str == 'voided':
+                # We just voided the payment so we need to update any matching transactions and their receipts
+                matching_txns = session.query(ReceiptTransaction).filter_by(intent_id=item.receipt_txn.intent_id
+                                                                            ).filter(ReceiptTransaction.id != item.receipt_txn.id)
+                for txn in matching_txns:
+                    session.add(txn)
+                    txn.refunded = txn.amount
+                    refund_id = str(refund.response_id) or getattr(refund, 'ref_id')
+                    refund.receipt_manager.create_refund_transaction(txn.receipt,
+                                                                    "Automatic refund of transaction " + txn.stripe_id,
+                                                                    refund_id,
+                                                                    txn.amount,
+                                                                    method=refund.method)
+                    refund.receipt_manager.update_transaction_refund(txn, txn.amount)
+                    model = session.get_model_by_receipt(txn.receipt)
+                    model_info = f"{model.__class__.__name__} {model.id}"
+                    refund.receipt_manager.create_receipt_item(txn.receipt,
+                                                               f"Automatic credit for voided transaction, see {model_info} for refund information.",
+                                                               txn.amount)
+
 
             message_add = f" and its transaction {refund.refund_str}."
             session.add_all(refund.get_receipt_items_to_add())
@@ -264,7 +311,22 @@ class Root:
             return {'error': message}
 
         if item.receipt_txn and item.receipt_txn.amount_left:
-            refund = TransactionRequest(item.receipt, amount=min(item.amount, item.receipt_txn.amount_left))
+            refund_amount = min(item.amount * item.count, item.receipt_txn.amount_left)
+            if params.get('exclude_fees'):
+                processing_fees = item.receipt_txn.calc_processing_fee(refund_amount)
+                session.add(ReceiptItem(
+                    receipt_id=item.receipt.id,
+                    desc=f"Processing Fees for Refunding {item.desc}",
+                    amount=processing_fees,
+                    who=AdminAccount.admin_name() or 'non-admin',
+                ))
+                refund_amount -= processing_fees
+
+            if item.receipt_txn.method == c.SQUARE and c.SPIN_TERMINAL_AUTH_KEY:
+                refund = SpinTerminalRequest(receipt=item.receipt, amount=refund_amount, method=item.receipt_txn.method)
+            else:
+                refund = TransactionRequest(receipt=item.receipt, amount=refund_amount, method=item.receipt_txn.method)
+
             error = refund.refund_or_cancel(item.receipt_txn)
             if error:
                 return {'error': error}
@@ -286,6 +348,8 @@ class Root:
 
     @ajax
     def add_receipt_txn(self, session, id='', **params):
+        from decimal import Decimal
+
         receipt = session.model_receipt(id)
         model = session.get_model_by_receipt(receipt)
 
@@ -293,7 +357,7 @@ class Root:
         if message:
             return {'error': message}
 
-        amount = int(params.get('amount', 0))
+        amount = Decimal(params.get('amount', 0))
 
         if params.get('txn_type', '') == 'refund':
             amount = amount * -1
@@ -410,38 +474,204 @@ class Root:
             'disable_button': txn.receipt.current_amount_owed == 0
         }
     
+    @ajax
+    def resend_receipt(self, session, id, **params):
+        from uber.tasks.registration import send_receipt_email
+        txn = session.receipt_transaction(id)
+        if not txn.receipt_info:
+            return {'error': "There is no receipt info for this transaction!"}
+        
+        send_receipt_email.delay(txn.receipt_info.id)
+        return {}
+    
     @not_site_mappable
-    def process_full_refund(self, session, id='', attendee_id='', group_id=''):
+    def settle_up(self, session, id=''):
+        receipt = session.model_receipt(id)
+        refund_amount = receipt.current_receipt_amount * -1
+        if refund_amount <= 0:
+            raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}',
+                               session.get_model_by_receipt(receipt).id,
+                               "We do not owe any money on this receipt!")
+        
+        txn_candidates = []
+        stripe_txns = []
+        for txn in sorted(receipt.refundable_txns, key=lambda txn: txn.added):
+            if txn.amount_left >= refund_amount:
+                txn_candidates.append(txn)
+                if txn.method == c.STRIPE:
+                    stripe_txns.append(txn)
+
+        if stripe_txns:
+            txn = stripe_txns[-1]
+        elif txn_candidates:
+            txn = txn_candidates[-1]
+        else:
+            raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}',
+                               session.get_model_by_receipt(receipt).id,
+                               f"There is no transaction with enough left to refund {format_currency(refund_amount / 100)}.")
+
+        if txn.method == c.SQUARE and c.SPIN_TERMINAL_AUTH_KEY:
+            refund = SpinTerminalRequest(receipt=txn.receipt, amount=refund_amount, method=txn.method)
+        else:
+            refund = TransactionRequest(receipt=txn.receipt, amount=refund_amount, method=txn.method)
+
+        error = refund.refund_or_cancel(txn)
+        if error:
+            raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}', session.get_model_by_receipt(receipt).id, error)
+        
+        session.add_all(refund.get_receipt_items_to_add())
+        session.commit()
+        raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}',
+                           session.get_model_by_receipt(receipt).id,
+                           f"{format_currency(refund_amount / 100)} refunded.")
+    
+    @not_site_mappable
+    def process_full_refund(self, session, id='', attendee_id='', group_id='', exclude_fees=False):
         receipt = session.model_receipt(id)
         refund_total = 0
-        for txn in receipt.refundable_txns:
-            refund = TransactionRequest(receipt, amount=txn.amount_left)
-            error = refund.refund_or_skip(txn)
-            if error:
-                raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}', attendee_id or group_id, error)
-            session.add_all(refund.get_receipt_items_to_add())
-            refund_total += refund.amount
-
-        receipt.closed = datetime.now()
-        session.add(receipt)
+        processing_fee_total = 0
+        group_leader_receipt = None
+        group_refund_amount = 0
 
         if attendee_id:
             model = session.attendee(attendee_id)
+            if model.in_promo_code_group and model.promo_code.group.buyer:
+                group_leader_receipt = session.get_receipt_by_model(model.promo_code.group.buyer)
+                group_refund_amount = model.promo_code.cost * 100
+        elif group_id:
+            model = session.group(group_id)
+
+        if session.get_receipt_by_model(model) == receipt:
+            for txn in receipt.refundable_txns:
+                refund_amount = txn.amount_left
+                if exclude_fees:
+                    processing_fees = txn.calc_processing_fee(txn.amount_left)
+                    session.add(ReceiptItem(
+                        receipt_id=txn.receipt.id,
+                        desc=f"Processing Fees for Full Refund of {txn.desc}",
+                        amount=processing_fees,
+                        who=AdminAccount.admin_name() or 'non-admin',
+                    ))
+                    refund_amount -= processing_fees
+                    processing_fee_total += processing_fees
+
+                if txn.method == c.SQUARE and c.SPIN_TERMINAL_AUTH_KEY:
+                    refund = SpinTerminalRequest(receipt=receipt, amount=refund_amount, method=txn.method)
+                else:
+                    refund = TransactionRequest(receipt=receipt, amount=refund_amount, method=txn.method)
+
+                error = refund.refund_or_skip(txn)
+                if error:
+                    raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}', attendee_id or group_id, error)
+                session.add_all(refund.get_receipt_items_to_add())
+                refund_total += refund.amount
+
+            refund_desc = "Full Refund for {model.id}"
+            if isinstance(model, Attendee):
+                refund_desc = f"Refunding and Cancelling {model.full_name}'s Badge",
+            elif isinstance(model, Group):
+                refund_desc = f"Refunding and Cancelling Group {model.name}"
+
+            session.add(ReceiptItem(
+                receipt_id=receipt.id,
+                desc=refund_desc,
+                amount=-(refund_total + processing_fee_total),
+                who=AdminAccount.admin_name() or 'non-admin',
+            ))
+
+            receipt.closed = datetime.now()
+            session.add(receipt)
+
+        if attendee_id:
             model.badge_status = c.REFUNDED_STATUS
             model.paid = c.REFUNDED
 
         if group_id:
-            model = session.group(group_id)
             model.status = c.CANCELLED
         
         session.add(model)
-        
         session.commit()
+
+        if group_refund_amount:
+            if refund_total:
+                error_start = f"This attendee was refunded {format_currency(refund_total / 100)}, but their"
+            else:
+                error_start = "This attendee's"
+
+            txn = sorted([txn for txn in group_leader_receipt.refundable_txns if txn.amount_left >= group_refund_amount],
+                                key=lambda x: x.added)[0]
+            if not txn:
+                message = f"{error_start} group leader could not be refunded \
+                            because there wasn't a transaction with enough money left on it for {model.full_name}'s badge."
+                raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}', attendee_id or group_id, message)
+            
+            session.add(ReceiptItem(
+                receipt_id=txn.receipt.id,
+                desc=f"Refunding {model.full_name}'s Promo Code",
+                amount=-group_refund_amount,
+                who=AdminAccount.admin_name() or 'non-admin',
+            ))
+
+            if exclude_fees:
+                processing_fees = txn.calc_processing_fee(group_refund_amount)
+                session.add(ReceiptItem(
+                    receipt_id=txn.receipt.id,
+                    desc=f"Processing Fees for Refund of {model.full_name}'s Promo Code",
+                    amount=processing_fees,
+                    who=AdminAccount.admin_name() or 'non-admin',
+                ))
+                group_refund_amount -= processing_fees
+            
+            if txn.method == c.SQUARE and c.SPIN_TERMINAL_AUTH_KEY:
+                refund = SpinTerminalRequest(receipt=txn.receipt, amount=group_refund_amount, method=txn.method)
+            else:
+                refund = TransactionRequest(receipt=txn.receipt, amount=group_refund_amount, method=txn.method)
+
+            error = refund.refund_or_cancel(txn)
+            if error:
+                message = f"{error_start} group leader could not be refunded: {error}"
+                raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}', attendee_id or group_id, message)
+            session.add_all(refund.get_receipt_items_to_add())
+            session.commit()
+
+        message_end = f" Their group leader was refunded {format_currency(group_refund_amount / 100)}." if group_refund_amount else ""
         raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}',
                            attendee_id or group_id,
-                           "{}'s registration has been cancelled and they have been refunded {}.".format(
-                            getattr(model, 'full_name', None) or model.name, format_currency(refund_total / 100)
+                           "{}'s registration has been cancelled and they have been refunded {}.{}".format(
+                            getattr(model, 'full_name', None) or model.name, format_currency(refund_total / 100), message_end
                            ))
+    
+    @ajax
+    def refresh_model_receipt(self, session, id=''):
+        try:
+            model = session.attendee(id)
+        except NoResultFound:
+            try:
+                model = session.group(id)
+            except NoResultFound:
+                model = session.art_show_application(id)
+
+        receipt = session.get_receipt_by_model(model)
+
+        old_cost = getattr(model, 'default_cost', getattr(model, 'cost', -1)) * 100
+        old_receipt_total = receipt.item_total
+
+        session.refresh_receipt_and_model(model)
+
+        new_cost = getattr(model, 'default_cost', getattr(model, 'cost', -1)) * 100
+        new_receipt_total = receipt.item_total
+        formatted_new_cost = format_currency(new_cost / 100)
+        formatted_new_receipt_total = format_currency(new_receipt_total / 100)
+
+        if new_cost == old_cost and new_receipt_total == old_receipt_total:
+            message = 'Model and receipt refreshed, but nothing changed.'
+        elif new_cost == new_receipt_total:
+            return {'message': 'Model and receipt refreshed and all discrepancies resolved!'}
+        elif new_cost != old_cost and new_receipt_total != old_receipt_total:
+            message = 'Model\'s default cost and receipt total updated.'
+        else:
+            message = "{} updated.".format('Model\'s default cost' if new_cost != old_cost else 'Receipt total')
+        return {'new_cost': formatted_new_cost, 'new_receipt_total': formatted_new_receipt_total, 'message': message}
 
     @not_site_mappable
     def remove_promo_code(self, session, id=''):
@@ -468,6 +698,9 @@ class Root:
     @site_mappable
     def orphaned_attendees(self, session, message='', **params):
         attendees = session.query(Attendee).filter(~Attendee.managers.any())
+
+        for domain in c.SSO_EMAIL_DOMAINS:
+            attendees = attendees.filter(~Attendee.email.ilike(f"%{domain}%"))
 
         if not params.get('show_all'):
             attendees = attendees.filter_by(is_valid=True, is_unassigned=False)
@@ -582,13 +815,160 @@ class Root:
         session.commit()
 
         return {'invalidated': id}
+    
+    def manage_workstations(self, session, message='', **params):
+        if cherrypy.request.method == 'POST':
+            skipped_reg_stations = []
+            terminal_ids = []
+            unmatched_terminal_ids = []
+            new_workstation_params = []
+            extra_warning = ""
 
-    def attendees_who_owe_money(self, session):
-        unpaid_attendees = [attendee for attendee in session.attendees_with_badges() 
-                            if attendee.amount_unpaid]
+            workstation_ids = [key.split('_', 1)[0] for key in params.keys() if key.endswith('_reg_station_id') and not key.startswith('new')]
+            for id in workstation_ids:
+                specific_params = {key.split('_', 1)[1]: val for key, val in params.items() if key.startswith(id)}
+                workstation = session.workstation_assignment(id)
+                if not specific_params.get('reg_station_id'):
+                    session.delete(workstation)
+                else:
+                    workstation.apply(specific_params)
+
+                if specific_params.get('terminal_id'):
+                    terminal_ids.append(specific_params['terminal_id'])
+            
+            if params.get('new_reg_station_id'):
+                if isinstance(params['new_reg_station_id'], str):
+                    new_workstation_params = [{key.split('_', 1)[1]: val for key, val in params.items() if key.startswith('new')}]
+                else:
+                    new_workstation_params = [{key.split('_', 1)[1]: val[i] for key, val in params.items() if key.startswith('new')} for i in range(len(params['new_reg_station_id']))]
+            
+            for new_params in new_workstation_params:
+                reg_station_id = new_params['reg_station_id']
+                if session.query(WorkstationAssignment).filter_by(reg_station_id=reg_station_id or -1).first():
+                    skipped_reg_stations.append(new_params['reg_station_id'])
+                else:
+                    if new_params.get('terminal_id'):
+                        terminal_ids.append(new_params['terminal_id'])
+                    new_workstation = WorkstationAssignment()
+                    session.add(new_workstation)
+                    new_workstation.apply(new_params)
+
+            for terminal_id in terminal_ids:
+                terminal_lookup_key = terminal_id.lower().replace('-', '')
+                if terminal_lookup_key not in c.TERMINAL_ID_TABLE:
+                    unmatched_terminal_ids.append(terminal_id)
+
+            if skipped_reg_stations:
+                extra_warning += f" Station(s) {readable_join(skipped_reg_stations)} skipped because those assignments already exist."
+
+            if unmatched_terminal_ids:
+                extra_warning += f" We could not find terminal ID(s) {readable_join(unmatched_terminal_ids)} in our terminal lookup table."
+            
+            raise HTTPRedirect('manage_workstations?message={}', f"Workstations updated.{extra_warning}")
+
         return {
-            'attendees': unpaid_attendees,
+            'workstation_assignments': session.query(WorkstationAssignment).all(),
+            'settlements': session.get_terminal_settlements(),
+            'message': message,
         }
+    
+    def delete_workstation(self, session, id):
+        try:
+            workstation = session.workstation_assignment(id)
+        except NoResultFound:
+            raise HTTPRedirect('manage_workstations?message={}', f"Workstation not found!")
+        
+        message = f"Workstation {workstation.reg_station_id} assignment deleted."
+        session.delete(workstation)
+        raise HTTPRedirect('manage_workstations?message={}', message)
+    
+    @ajax
+    def update_workstation(self, session, id, **params):
+        try:
+            workstation = session.workstation_assignment(id)
+        except NoResultFound:
+            return {'success': False, 'message': "Workstation not found!"}
+        
+        workstation.reg_station_id = params.get('reg_station_id', '')
+        workstation.terminal_id = params.get('terminal_id', '')
+        workstation.printer_id = params.get('printer_id', '')
+        workstation.minor_printer_id = params.get('minor_printer_id', '')
+        session.commit()
+        return {'success': True, 'message': "Workstation assignment updated."}
+    
+    def close_out_check(self, session):
+        closeout_requests = c.REDIS_STORE.hgetall(c.REDIS_PREFIX + 'closeout_requests')
+        processed_list = []
+
+        for request_timestamp, terminal_ids in closeout_requests.items():
+            closeout_report = c.REDIS_STORE.hget(c.REDIS_PREFIX + 'completed_closeout_requests', request_timestamp)
+            if closeout_report:
+                # TODO: Finish the report part of this
+                report_dict = json.loads(closeout_report)
+                return "All terminals have been closed out!"
+            for terminal_id in terminal_ids:
+                if c.REDIS_STORE.hget(c.REDIS_PREFIX + 'spin_terminal_closeout:' + terminal_id, 'last_request_timestamp'):
+                    processed_list.append(terminal_id)
+    
+    def close_out_terminals(self, session, **params):
+        from uber.tasks.registration import close_out_terminals
+
+        if not params.get('workstation_ids'):
+            raise HTTPRedirect('manage_workstations?message={}', "Please enter one or more workstation IDs to close out.")
+        
+        expanded_ids = re.sub(
+            r'(\d+)-(\d+)',
+            lambda match: ','.join(
+                str(i) for i in range(
+                    int(match.group(1)),
+                    int(match.group(2)) + 1
+                )
+            ), params['workstation_ids']
+        )
+        id_list = [id.strip() for id in expanded_ids.split(',')]
+
+        workstation_and_terminal_ids = []
+        missing_terminals = []
+        unmatched_terminals = []
+        no_matching_workstations = True
+        no_valid_workstations = True
+        extra_warning = ""
+
+        for id in id_list:
+            terminal_id = ""
+            workstation_assignment = session.query(WorkstationAssignment).filter_by(reg_station_id=id).first()
+            if not workstation_assignment:
+                pass
+            elif not workstation_assignment.terminal_id:
+                missing_terminals.append(id)
+            else:
+                lookup_key = workstation_assignment.terminal_id.lower().replace('-', '')
+                if lookup_key not in c.TERMINAL_ID_TABLE:
+                    unmatched_terminals.append(id)
+                else:
+                    terminal_id = c.TERMINAL_ID_TABLE[lookup_key]
+
+            if workstation_assignment:
+                no_matching_workstations = False
+
+            if terminal_id:
+                no_valid_workstations = False
+                workstation_and_terminal_ids.append((id, terminal_id))
+        
+        close_out_terminals.delay(workstation_and_terminal_ids, AdminAccount.admin_name())
+
+        if no_matching_workstations:
+            raise HTTPRedirect('manage_workstations?message={}', f"No workstations found matching ID(s) {params.get('workstation_ids')}")
+        
+        if missing_terminals:
+            extra_warning += f" Workstation(s) {readable_join(missing_terminals)} did not have terminals assigned."
+        if unmatched_terminals:
+            extra_warning += f" We could not find the terminals for workstation(s) {readable_join(unmatched_terminals)} in our lookup table."
+
+        if no_valid_workstations:
+            raise HTTPRedirect('manage_workstations?message={}', f"No workstations matching ID(s) {params.get('workstation_ids')} could be closed out.{extra_warning}")
+
+        raise HTTPRedirect('manage_workstations?message={}', f"Started closeout for workstations matching ID(s) {params.get('workstation_ids')}.{extra_warning}")
 
     @csv_file
     @not_site_mappable

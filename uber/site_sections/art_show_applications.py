@@ -3,6 +3,7 @@ from six import string_types
 from pockets.autolog import log
 
 from uber.config import c
+from uber.custom_tags import email_only
 from uber.decorators import ajax, all_renderable, render, credit_card, requires_account
 from uber.errors import HTTPRedirect
 from uber.models import ArtShowApplication, ModelReceipt
@@ -49,7 +50,7 @@ class Root:
                 session.add(app)
                 send_email.delay(
                     c.ART_SHOW_EMAIL,
-                    c.ART_SHOW_EMAIL,
+                    c.ART_SHOW_NOTIFICATIONS_EMAIL,
                     'Art Show Application Received',
                     render('emails/art_show/reg_notification.txt',
                            {'app': app}, encoding=None), model=app.to_dict('id'))
@@ -118,9 +119,20 @@ class Root:
         if error:
             return {'error': "Something went wrong with this payment. Please refresh the page and try again."}
 
-        stripe_intent = txn.get_stripe_intent()
+        if c.AUTHORIZENET_LOGIN_ID:
+            # Authorize.net doesn't actually have a concept of pending transactions,
+            # so there's no transaction to resume. Create a new one.
+            new_txn_requent = TransactionRequest(txn.receipt, app.attendee.email, txn.desc, txn.amount)
+            stripe_intent = new_txn_requent.stripe_or_mock_intent()
+            txn.intent_id = stripe_intent.id
+            session.commit()
+        else:
+            stripe_intent = txn.get_stripe_intent()
 
-        if stripe_intent.charges:
+        if not stripe_intent:
+            return {'error': "Something went wrong. Please contact us at {}.".format(email_only(c.REGDESK_EMAIL))}
+
+        if not c.AUTHORIZENET_LOGIN_ID and stripe_intent.status == "succeeded":
             return {'error': "This payment has already been finalized!"}
 
         return {'stripe_intent': stripe_intent,
@@ -135,16 +147,17 @@ class Root:
         piece = session.art_show_piece(params, restricted=restricted, bools=['for_sale', 'no_quick_sale'])
         app = session.art_show_application(app_id)
 
-        if not params.get('name'):
-            message += "ERROR: Please enter a name for this piece."
-        if not params.get('gallery'):
-            message += "<br>" if not params.get('name') else "ERROR: "
-            message += "Please select which gallery you will hang this piece in."
-        if not params.get('type'):
-            message += "<br>" if not params.get('gallery') or not params.get('name') else "ERROR: "
-            message += "Please choose whether this piece is a print or an original."
-        if message:
-            return {'error': message}
+        if restricted:
+            if not params.get('name'):
+                message += "ERROR: Please enter a name for this piece."
+            if not params.get('gallery'):
+                message += "<br>" if not params.get('name') else "ERROR: "
+                message += "Please select which gallery you will hang this piece in."
+            if not params.get('type'):
+                message += "<br>" if not params.get('gallery') or not params.get('name') else "ERROR: "
+                message += "Please choose whether this piece is a print or an original."
+            if message:
+                return {'error': message}
 
         piece.app_id = app.id
         piece.app = app
@@ -290,7 +303,7 @@ class Root:
         charge_desc = "{}'s Art Show Application: {}".format(app.attendee.full_name, receipt.charge_description_list)
         charge = TransactionRequest(receipt, app.attendee.email, charge_desc)
         
-        message = charge.process_payment()
+        message = charge.prepare_payment()
 
         if message:
             return {'error': message}

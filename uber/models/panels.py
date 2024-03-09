@@ -8,6 +8,7 @@ from sqlalchemy.types import Boolean, Integer
 from sqlalchemy.ext.hybrid import hybrid_property
 
 from uber.config import c
+from uber.decorators import presave_adjustment
 from uber.models import MagModel
 from uber.models.types import default_relationship as relationship, utcnow, Choice, DefaultColumn as Column, \
     MultiChoice, SocialMediaMixin
@@ -108,8 +109,9 @@ class PanelApplication(MagModel):
     available = Column(UnicodeText)
     affiliations = Column(UnicodeText)
     past_attendance = Column(UnicodeText)
-    department = Column(Choice(c.PANEL_DEPT_OPTS), default=c.PANELS)
+    department = Column(Choice(c.PANEL_DEPT_OPTS))
     rating = Column(Choice(c.PANEL_RATING_OPTS), default=c.UNRATED)
+    granular_rating = Column(MultiChoice(c.PANEL_CONTENT_OPTS))
     presentation = Column(Choice(c.PRESENTATION_OPTS))
     other_presentation = Column(UnicodeText)
     noise_level = Column(Choice(c.NOISE_LEVEL_OPTS))
@@ -134,6 +136,12 @@ class PanelApplication(MagModel):
     applicants = relationship('PanelApplicant', backref='application')
 
     email_model_name = 'app'
+
+    @presave_adjustment
+    def update_event_info(self):
+        if self.event:
+            self.event.name = self.name
+            self.event.description = self.description
 
     @property
     def email(self):
@@ -188,6 +196,8 @@ class PanelApplicant(SocialMediaMixin, MagModel):
     occupation = Column(UnicodeText)
     website = Column(UnicodeText)
     other_credentials = Column(UnicodeText)
+    guidebook_bio = Column(UnicodeText)
+    display_name = Column(UnicodeText)
 
     @property
     def has_credentials(self):

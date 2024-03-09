@@ -55,8 +55,6 @@ class Root:
             message = check(studio)
             if not message and studio.is_new:
                 message = check(developer)
-                if not message and 'covid_agreement' not in params:
-                    message = 'You must check the box acknowledging the {} COVID Policy'.format(c.EVENT_NAME_AND_YEAR)
             if not message:
                 session.add(studio)
                 if studio.is_new:
@@ -68,7 +66,6 @@ class Root:
             'message': message,
             'studio': studio,
             'developer': developer,
-            'covid_agreement': params.get('covid_agreement'),
         }
 
     def game(self, session, message='', **params):
@@ -251,7 +248,7 @@ class Root:
                             group.leader_id = attendee.id
                 for i in range(badges_remaining):
                     group.attendees.append(Attendee(badge_type=c.ATTENDEE_BADGE, paid=c.NEED_NOT_PAY))
-                group.cost = group.default_cost
+                group.cost = group.calc_default_cost()
                 group.guest = GuestGroup()
                 group.guest.group_type = c.MIVS
                 raise HTTPRedirect('index?message={}', 'Your studio has been registered')

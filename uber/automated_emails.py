@@ -126,14 +126,16 @@ class AutomatedEmailFixture:
         before = [d.active_before for d in when if d.active_before]
         self.active_before = max(before) if before else None
 
+    def update_template_plugin_info(self):
         env = JinjaEnv.env()
         try:
-            template_path = pathlib.Path(env.get_template(os.path.join('emails', self.template)).name)
-            self.template_plugin = template_path.parts[3]
-            self.template_url = f"https://github.com/magfest/{self.template_plugin}/tree/main/{self.template_plugin}/{pathlib.Path(*template_path.parts[5:]).as_posix()}"
+            template_path = pathlib.Path(env.get_or_select_template(os.path.join('emails', self.template)).filename)
+            self.template_plugin_name = template_path.parts[3]
+            self.template_url = f"https://github.com/magfest/{self.template_plugin_name}/tree/main/{self.template_plugin_name}/{pathlib.Path(*template_path.parts[5:]).as_posix()}"
         except jinja2.exceptions.TemplateNotFound:
+            self.template_plugin_name = "ERROR: TEMPLATE NOT FOUND"
             self.template_url = ""
-        
+        return self.template_plugin_name, self.template_url
 
     @property
     def body(self):
@@ -160,16 +162,18 @@ AutomatedEmailFixture(
     'placeholders/deferred.html',
     lambda a: a.placeholder and a.registered_local <= c.PREREG_OPEN and \
               a.badge_type == c.ATTENDEE_BADGE and a.paid == c.NEED_NOT_PAY and not a.admin_account,
+    when=after(c.PREREG_OPEN),
     ident='claim_deferred_badge')
 
-AutomatedEmailFixture(
-    AttendeeAccount,
-    '{EVENT_NAME} account creation confirmed',
-    'reg_workflow/account_confirmation.html',
-    lambda a: not a.imported and a.hashed and not a.password_reset and not a.is_sso_account,
-    needs_approval=False,
-    allow_at_the_con=True,
-    ident='attendee_account_confirmed')
+if c.ATTENDEE_ACCOUNTS_ENABLED:
+    AutomatedEmailFixture(
+        AttendeeAccount,
+        '{EVENT_NAME} account creation confirmed',
+        'reg_workflow/account_confirmation.html',
+        lambda a: not a.imported and a.hashed and not a.password_reset and not a.is_sso_account,
+        needs_approval=False,
+        allow_at_the_con=True,
+        ident='attendee_account_confirmed')
 
 AutomatedEmailFixture(
     PromoCodeGroup,
@@ -212,6 +216,7 @@ AutomatedEmailFixture(
     #     Attendee.amount_extra != 0,
     #     Attendee.amount_paid >= Attendee.amount_extra),
     needs_approval=False,
+    sender=c.MERCH_EMAIL,
     ident='group_extra_payment_received')
 
 
@@ -635,13 +640,14 @@ if c.PRINTED_BADGE_DEADLINE:
         when=days_before(7, c.PRINTED_BADGE_DEADLINE),
         ident='volunteer_personalized_badge_reminder')
 
-    AutomatedEmailFixture(
-        Attendee,
-        'Personalized {EVENT_NAME} ({EVENT_DATE}) badges will be ordered next week',
-        'personalized_badges/reminder.txt',
-        lambda a: a.badge_type in c.PREASSIGNED_BADGE_TYPES and not a.placeholder,
-        when=days_before(7, c.PRINTED_BADGE_DEADLINE),
-        ident='personalized_badge_reminder')
+    if [badge_type for badge_type in c.PREASSIGNED_BADGE_TYPES if badge_type not in [c.STAFF_BADGE, c.CONTRACTOR_BADGE]]:
+        AutomatedEmailFixture(
+            Attendee,
+            'Personalized {EVENT_NAME} ({EVENT_DATE}) badges will be ordered next week',
+            'personalized_badges/reminder.txt',
+            lambda a: a.badge_type in c.PREASSIGNED_BADGE_TYPES and not a.placeholder,
+            when=days_before(7, c.PRINTED_BADGE_DEADLINE),
+            ident='personalized_badge_reminder')
 
 
 # MAGFest requires signed and notarized parental consent forms for anyone under 18.  This automated email reminder to
@@ -650,7 +656,8 @@ AutomatedEmailFixture(
     Attendee,
     '{EVENT_NAME} ({EVENT_DATE}) parental consent form reminder',
     'reg_workflow/under_18_reminder.txt',
-    lambda a: c.CONSENT_FORM_URL and a.age_group_conf['consent_form'],
+    lambda a: c.CONSENT_FORM_URL and a.age_group_conf['consent_form'] and days_after(14, a.registered)(),
+    when=days_before(60, c.EPOCH),
     allow_at_the_con=True,
     ident='under_18_parental_consent_reminder')
 
@@ -662,6 +669,7 @@ AutomatedEmailFixture(
     'Check in faster at {EVENT_NAME}',
     'reg_workflow/attendee_qrcode.html',
     lambda a: not a.is_not_ready_to_checkin and c.USE_CHECKIN_BARCODE,
+    when=days_before(7, c.EPOCH),
     allow_at_the_con=True,
     ident='qrcode_for_checkin')
 
@@ -1079,7 +1087,7 @@ if c.MITS_ENABLED:
         ident='mits_tax_form')
 
     MITSEmailFixture(
-        'MITS 2019 Developer Perspective Feedback',
+        'MITS 2024 Developer Perspective Feedback',
         'mits/mits_feedback.txt',
         lambda team: team.accepted,
         ident='mits_feedback',
@@ -1132,7 +1140,7 @@ if c.PANELS_ENABLED:
 
     PanelAppEmailFixture(
         'Your {EVENT_NAME} Panel Application Has Been Received: {{ app.name }}',
-        'panels/panel_app_confirmation.txt',
+        'panels/application.html',
         lambda a: True,
         needs_approval=False,
         ident='panel_received')

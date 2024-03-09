@@ -133,6 +133,20 @@ def timestamp(dt):
 
 
 @JinjaEnv.jinja_filter
+def timestamp_to_dt(timestamp):
+    from datetime import datetime
+    return '' if not timestamp else datetime.fromtimestamp(int(float(timestamp)))
+
+
+@JinjaEnv.jinja_filter
+def tpn_to_terminal_id(tpn):
+    reverse_lookup = {v: k for k, v in c.TERMINAL_ID_TABLE.items()}
+    if tpn in reverse_lookup:
+        return (reverse_lookup[tpn][:3] + "-" + reverse_lookup[tpn][3:]).upper()
+    return tpn + " (ID not found)"
+
+
+@JinjaEnv.jinja_filter
 def yesno(value, arg=None):
     """
     PORTED FROM DJANGO
@@ -257,10 +271,11 @@ def email_to_link(email=None):
 
 
 @JinjaEnv.jinja_filter
-def popup_link(href, text='<sup>?</sup>'):
+def popup_link(href, text='<sup>?</sup>', extra_classes=''):
     return safe_string("<a onClick='window.open(&quot;{href}&quot;, &quot;info&quot;, " \
         "&quot;toolbar=no,height=500,width=375,scrollbars=yes&quot;).focus();" \
-        "return false;' href='{href}'>{text}</a>".format(href=href, text=text))
+        "return false;' {classes}href='{href}'>{text}</a>".format(href=href, text=text,
+                                                                  classes=f'class="{extra_classes}" ' if extra_classes else ''))
 
 
 @JinjaEnv.jinja_filter
