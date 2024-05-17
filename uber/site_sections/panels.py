@@ -1,5 +1,7 @@
 import cherrypy
 
+from datetime import datetime
+
 from uber.config import c
 from uber.decorators import all_renderable
 from uber.errors import HTTPRedirect
@@ -32,8 +34,6 @@ def check_extra_verifications(**params):
         return 'You must check the box to agree to be bound by our Code of Conduct'
     elif 'data_agreement' not in params:
         return 'You must check the box to agree for your information to be used for determining panels selection'
-    elif 'covid_agreement' not in params:
-        return 'You must check the box to agree to the {} COVID Policy'.format(c.EVENT_NAME_AND_YEAR)
     elif 'verify_unavailable' not in params:
         return 'You must check the box to confirm that you are only unavailable at the specified times'
     elif 'verify_waiting' not in params:
@@ -93,14 +93,13 @@ class Root:
             'other_panelists': other_panelists,
             'coc_agreement': params.get('coc_agreement'),
             'data_agreement': params.get('data_agreement'),
-            'covid_agreement': params.get('covid_agreement'),
             'verify_tos': params.get('verify_tos'),
             'verify_poc': params.get('verify_poc'),
             'verify_waiting': params.get('verify_waiting'),
             'verify_unavailable': params.get('verify_unavailable')
         }
 
-    def guest(self, session, poc_id, return_to='', message='', **params):
+    def guest(self, session, attendee_id, return_to='', message='', **params):
         """
         In some cases, we want pre-existing attendees (e.g., guests) to submit panel ideas.
         This submission form bypasses the need to enter in one's personal and contact info
@@ -110,8 +109,7 @@ class Root:
 
         app = session.panel_application(
             params, checkgroups=PanelApplication.all_checkgroups, restricted=True, ignore_csrf=True)
-        app.poc_id = poc_id
-        attendee = session.attendee(id=poc_id)
+        attendee = session.attendee(id=attendee_id)
         if attendee.badge_type != c.GUEST_BADGE:
             add_opt(attendee.ribbon_ints, c.PANELIST_RIBBON)
         panelist = PanelApplicant(
@@ -125,7 +123,7 @@ class Root:
         )
         other_panelists = compile_other_panelists_from_params(session, app, **params)
         go_to = return_to if 'ignore_return_to' not in params and return_to \
-            else 'guest?poc_id=' + poc_id + '&return_to=' + return_to
+            else 'guest?attendee_id=' + attendee_id + '&return_to=' + return_to
 
         if cherrypy.request.method == 'POST':
             message = process_panel_app(session, app, panelist, other_panelists, **params)
@@ -136,9 +134,19 @@ class Root:
             'app': app,
             'message': message,
             'attendee': attendee,
-            'poc_id': poc_id,
+            'attendee_id': attendee_id,
             'other_panelists': other_panelists,
             'return_to': return_to
+        }
+
+    def confirm_panel(self, session, id):
+        app = session.panel_application(id)
+        app.confirmed = datetime.now()
+        session.add(app)
+        session.commit()
+
+        return {
+            'app': app,
         }
 
 

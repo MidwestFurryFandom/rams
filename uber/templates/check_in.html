@@ -1,57 +1,50 @@
-<div class="modal fade" id="checkin_modal" role="dialog">
-    <div class="modal-dialog modal-lg">
-        <!-- Modal content-->
+<div class="modal" id="checkin_modal" tabindex="-1">
+    <div class="modal-dialog">
         <div class="modal-content"><div style='padding: 10px;'>Loading...</div></div>
     </div>
 </div>
 
 <script type="text/javascript">
-checkInModal = $('#checkin_modal');
-reg_station = {{ reg_station|default(0, true) }};
-printer_default_id = "{{ printer_default_id }}";
-printer_minor_id = "{{ printer_minor_id }}";
-badge_printing_enabled = {{ c.BADGE_PRINTING_ENABLED|yesno("true,false") }};
+checkInModal = new bootstrap.Modal($('#checkin_modal'));
+printer_id = "{{ workstation_assignment.printer_id if workstation_assignment else '' }}";
+minor_printer_id = "{{ workstation_assignment.minor_or_adult_printer_id if workstation_assignment else '' }}";
 
-var loadCheckInFormModal = function (attendeeID, printerID='') {
+var loadCheckInFormModal = function (attendeeID) {
     $('#checkin_modal .modal-content').load('../registration/check_in_form?id=' + attendeeID, function() {
         if ($('.check-in').length) {
-            if (printerID) {
-                $.field('printer_id').val(printerID);
-            }
-            checkInModal.find('input.date').datetextentry({
-                field_order: 'MDY',
-                show_tooltips: false
-            });
-            checkInModal.on('hidden.bs.modal', function (e) {
+            $('#payment-loading-message').hide();
+        } else {
+            showErrorMessage("Form loading failed.");
+            checkInModal.hide();
+        }
+    });
+}
+
+var loadCheckInCartModal = function (accountId) {
+    $('#checkin_modal .modal-content').load('../registration/check_in_cart_form?id=' + accountId, function() {
+        if ($('.check-in').length) {
+            $('#checkin_modal').on('hidden.bs.modal', function (e) {
                 $('#stripeModal').remove();
             });
+            $('#payment-loading-message').hide();
+            $('#checkin_modal .modal-dialog').removeClass().addClass('modal-dialog modal-xl');
+            checkInModal.show();
         } else {
-            toastr.error("Form loading failed.");
-            checkInModal.modal('hide');
+            showErrorMessage("Form loading failed.");
         }
     });
 }
 
 var loadCheckInModal = function (attendeeID) {
-    checkInModal.modal({show:true});
-    
-    if (badge_printing_enabled && (!reg_station || !printer_default_id || !printer_minor_id)) {
-    $('#checkin_modal .modal-content').load('../registration/printer_id_form?id=' + attendeeID, function() {
-        if ($('.printer-id').length) {
-        } else {
-            toastr.error("Form loading failed.");
-            checkInModal.modal('hide');
-        }
-        });
-    } else {
-        loadCheckInFormModal(attendeeID);
-    }
+    checkInModal.show();
+    $('#checkin_modal .modal-dialog').removeClass().addClass('modal-dialog modal-lg');
+    loadCheckInFormModal(attendeeID);
 };
 
 // Hide modal on Esc keydown
 $(document).keydown(function(event) { 
     if (event.keyCode == 27) { 
-        checkInModal.modal('hide');
+        checkInModal.hide();
     }
 });
 
@@ -62,25 +55,25 @@ var checkIn = function (attendeeID) {
         dataType: 'json',
         data: $("#check_in_form_" + attendeeID).serialize(),
         success: function (json) {
-            toastr.clear();
+            hideMessageBox();
             var message = json.message;
             if (json.success) {
-                checkInModal.modal('hide');
+                checkInModal.hide();
                 message += ' &nbsp; <a href="#" onClick="undoCheckIn(\'' + attendeeID + '\', ' + json.pre_badge + ') ; return false">Undo</a>';
                 $('#paid_' + attendeeID).html(json.paid);
                 $('#cin_' + attendeeID).html(json.checked_in);
                 $('#age_' + attendeeID).parent().html(json.age_group);
                 $('#num_' + attendeeID).parent().html(json.badge);
-                toastr.success(message);
+                $("#message-alert").addClass("alert-success").show().children('span').html(message);
             } else {
-                toastr.error(message);
+                showErrorMessage(message);
             }
             if (json.increment) {
                 $('#checkin_count').html(1 + parseInt($("#checkin_count").text()));
             }
         },
         error: function () {
-            toastr.error('Unable to connect to server, please try again.');
+            showErrorMessage('Unable to connect to server, please try again.');
         }
     });
 };

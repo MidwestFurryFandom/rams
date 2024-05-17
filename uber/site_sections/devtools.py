@@ -1,22 +1,28 @@
 import os
 import json
 import shlex
+import time
+import sys
 import subprocess
+import traceback
 import csv
-import urllib
+import random
 import six
+import pypsutil
+import cherrypy
+import threading
 from datetime import datetime
 
-from sideboard.debugging import register_diagnostics_status_function, gather_diagnostics_status_information
 from sqlalchemy.dialects.postgresql.json import JSONB
 from pockets.autolog import log
 from pytz import UTC
 from sqlalchemy.types import Date, Boolean, Integer
+from sqlalchemy import text
 
 from uber.badge_funcs import badge_consistency_check
-from uber.config import c, _config
-from uber.decorators import all_renderable, csv_file, set_csv_filename, site_mappable
+from uber.decorators import all_renderable, csv_file, public, site_mappable
 from uber.models import Choice, MultiChoice, Session, UTCDateTime
+from uber.tasks.health import ping
 
 
 # admin utilities.  should not be used during normal ubersystem operations except by developers / sysadmins
@@ -69,6 +75,51 @@ def prepare_model_export(model, filtered_models=None):
         rows.append(row)
     return rows
 
+def _get_thread_current_stacktrace(thread_stack, thread):
+    out = []
+    status = '[unknown]'
+    if thread.native_id != -1:
+        status = pypsutil.Process(thread.native_id).status().name
+    out.append('\n--------------------------------------------------------------------------')
+    out.append('# Thread name: "%s"\n# Python thread.ident: %d\n# Linux Thread PID (TID): %d\n# Run Status: %s'
+                % (thread.name, thread.ident, thread.native_id, status))
+    for filename, lineno, name, line in traceback.extract_stack(thread_stack):
+        out.append('File: "%s", line %d, in %s' % (filename, lineno, name))
+        if line:
+            out.append('  %s' % (line.strip()))
+    return out
+
+def threading_information():
+    out = []
+    threads_by_id = dict([(thread.ident, thread) for thread in threading.enumerate()])
+    for thread_id, thread_stack in sys._current_frames().items():
+        thread = threads_by_id.get(thread_id, '')
+        out += _get_thread_current_stacktrace(thread_stack, thread)
+        if thread.native_id != -1:
+            proc = pypsutil.Process(thread.native_id)
+            out.append(f"Mem: {proc.memory_info().rss}")
+            out.append(f"CPU: {proc.cpu_times().user}")
+    return '\n'.join(out)
+
+def general_system_info():
+    """
+    Print general system info
+    TODO:
+    - print memory nicer, convert mem to megabytes
+    - disk partitions usage,
+    - # of open file handles
+    - # free inode count
+    - # of cherrypy session files
+    - # of cherrypy session locks (should be low)
+    """
+    out = []
+    out += ['Mem: ' + repr(pypsutil.virtual_memory().used)]
+    out += ['Swap: ' + repr(pypsutil.swap_memory().used)]
+    return '\n'.join(out)
+
+def database_pool_information():
+    return Session.engine.pool.status()
+
 @all_renderable()
 class Root:
     def index(self):
@@ -91,8 +142,11 @@ class Root:
         }
 
     def dump_diagnostics(self):
+        out = ''
+        for func in [general_system_info, threading_information, database_pool_information]:
+            out += '--------- {} ---------\n{}\n\n\n'.format(func.__name__.replace('_', ' ').upper(), func())
         return {
-            'diagnostics_data': gather_diagnostics_status_information(),
+            'diagnostics_data': out,
         }
 
     def badge_number_consistency_check(self, session, run_check=None):
@@ -158,6 +212,10 @@ class Root:
                         val = UTC.localize(datetime.strptime(val, date_format))
                 elif isinstance(col.type, Date):
                     val = datetime.strptime(val, date_format).date()
+                elif isinstance(col.type, Choice):
+                    val = col.type.convert_if_label(val)
+                elif isinstance(col.type, MultiChoice):
+                    val = col.type.convert_if_labels(val)
                 elif isinstance(col.type, Integer):
                     val = int(val)
                 elif isinstance(col.type, JSONB):
@@ -197,7 +255,40 @@ class Root:
         for row in rows:
             out.writerow(row)
 
+    @public
+    def health(self, session):
+        cherrypy.response.headers["Access-Control-Allow-Origin"] = "*"
+        cherrypy.session.load()
 
-@register_diagnostics_status_function
-def database_pool_information():
-    return Session.engine.pool.status()
+        read_count = cherrypy.session.get("read_count", default=0)
+        read_count += 1
+        cherrypy.session["read_count"] = read_count
+        session_commit_time = -time.perf_counter()
+        cherrypy.session.save()
+        session_commit_time += time.perf_counter()
+
+        db_read_time = -time.perf_counter()
+        session.execute(text('SELECT 1'))
+        db_read_time += time.perf_counter()
+
+        if os.environ.get("ENABLE_CELERY", "true").lower() == "true":
+            payload = random.randrange(1024)
+            task_run_time = -time.perf_counter()
+            response = ping.delay(payload).wait(timeout=2)
+            task_run_time += time.perf_counter()
+        else:
+            task_run_time = 0
+            payload = "Not Run, ENABLE_CELERY != true"
+            response = "Not Run, ENABLE_CELERY != true"
+
+        return json.dumps({
+            'server_current_timestamp': int(datetime.utcnow().timestamp()),
+            'session_read_count': read_count,
+            'session_commit_time': session_commit_time,
+            'db_read_time': db_read_time,
+            'db_status': Session.engine.pool.status(),
+            'task_run_time': task_run_time,
+            'task_response_correct': payload == response,
+            'task_payload': payload,
+            'task_response': response,
+        })

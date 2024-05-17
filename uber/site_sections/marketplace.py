@@ -1,12 +1,12 @@
 import cherrypy
-from six import string_types
 
 from uber.config import c
 from uber.decorators import ajax, all_renderable, render, credit_card, requires_account
 from uber.errors import HTTPRedirect
 from uber.models import MarketplaceApplication
 from uber.tasks.email import send_email
-from uber.utils import Charge, check
+from uber.utils import check
+from uber.payments import TransactionRequest
 
 
 @all_renderable(public=True)
@@ -44,12 +44,12 @@ class Root:
                 app.attendee = attendee
 
                 session.add(app)
-                send_email(
+                send_email.delay(
                     c.MARKETPLACE_APP_EMAIL,
                     c.MARKETPLACE_APP_EMAIL,
                     'Marketplace Application Received',
                     render('emails/marketplace/reg_notification.txt',
-                           {'app': app}), model=app)
+                           {'app': app}), model=app, encoding=None)
                 session.commit()
                 raise HTTPRedirect('confirmation?id={}', app.id)
 
@@ -102,20 +102,21 @@ class Root:
     @credit_card
     def process_marketplace_payment(self, session, id):
         app = session.marketplace_application(id)
-        
-        receipt = session.get_receipt_by_model(app, create_if_none=True)
-        
-        charge_desc = "{}'s Marketplace Application: {}".format(app.attendee.full_name, receipt.charge_description_list)
-        charge = Charge(app, amount=receipt.current_amount_owed, description=charge_desc)
-        
-        stripe_intent = session.process_receipt_charge(receipt, charge)
 
-        if isinstance(stripe_intent, string_types):
-            return {'error': stripe_intent}
-        
+        receipt = session.get_receipt_by_model(app, create_if_none="DEFAULT")
+
+        charge_desc = "{}'s Marketplace Application: {}".format(app.attendee.full_name, receipt.charge_description_list)
+        charge = TransactionRequest(receipt, app.attendee.email, charge_desc)
+
+        message = charge.prepare_payment()
+
+        if message:
+            return {'error': message}
+
+        session.add_all(charge.get_receipt_items_to_add())
         session.commit()
-        
-        return {'stripe_intent': stripe_intent,
+
+        return {'stripe_intent': charge.intent,
                 'success_url': 'edit?id={}&message={}'.format(app.id,
                                                               'Your payment has been accepted'),
                 'cancel_url': '../preregistration/cancel_payment'}

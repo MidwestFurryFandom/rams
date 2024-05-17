@@ -9,7 +9,7 @@ import six
 from pytz import UTC
 from dateutil import parser as dateparser
 from residue import CoerceUTF8 as UnicodeText, UTCDateTime, UUID
-from sqlalchemy import func, select, CheckConstraint
+from sqlalchemy import exists, func, select, CheckConstraint
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.schema import Index, ForeignKey
 from sqlalchemy.types import Integer
@@ -170,18 +170,39 @@ class PromoCodeGroup(MagModel):
     def email(self):
         return self.buyer.email if self.buyer else None
 
-    @property
+    @hybrid_property
     def total_cost(self):
-        return sum(code.cost for code in self.promo_codes if code.cost)
+        return sum(code.cost for code in self.paid_codes if code.cost)
+
+    @total_cost.expression
+    def total_cost(cls):
+        return select([func.sum(PromoCode.cost)]
+                      ).where(PromoCode.group_id == cls.id).where(PromoCode.refunded == False  # noqa: E712
+                                                                  ).label('total_cost')
+
+    @property
+    def paid_codes(self):
+        return [code for code in self.promo_codes if not code.refunded]
 
     @property
     def valid_codes(self):
         return [code for code in self.promo_codes if code.is_valid]
 
     @property
+    def unused_codes(self):
+        # Bypasses codes' expiration date; only use this to count
+        # how many codes in a group went unused
+        return [code for code in self.promo_codes if code.uses_count == 0]
+
+    @property
+    def used_promo_codes(self):
+        return [code for code in self.promo_codes if code.valid_used_by]
+
+    @property
     def sorted_promo_codes(self):
-        return list(sorted(self.promo_codes, key=lambda pc: (not pc.used_by,
-                                                             pc.used_by[0].full_name if pc.used_by else pc.code)))
+        return list(sorted(self.promo_codes, key=lambda pc: (not pc.valid_used_by,
+                                                             pc.valid_used_by[0].full_name
+                                                             if pc.valid_used_by else pc.code)))
 
     @property
     def hours_since_registered(self):
@@ -361,6 +382,15 @@ class PromoCode(MagModel):
     def is_expired(cls):
         return cls.expiration_date < localized_now()
 
+    @hybrid_property
+    def group_registered(self):
+        if self.group_id:
+            return self.group.registered
+
+    @group_registered.expression
+    def group_registered(cls):
+        return select([PromoCodeGroup.registered]).where(PromoCodeGroup.id == cls.group_id).label('group_registered')
+
     @property
     def is_free(self):
         return not self.discount or (
@@ -396,18 +426,24 @@ class PromoCode(MagModel):
         return func.replace(func.replace(func.lower(cls.code), '-', ''), ' ', '')
 
     @property
+    def valid_used_by(self):
+        return [attendee for attendee in self.used_by if attendee.is_valid]
+
+    @property
     def uses_allowed_str(self):
         uses = self.uses_allowed
         return 'Unlimited uses' if uses is None else '{} use{} allowed'.format(uses, '' if uses == 1 else 's')
 
     @hybrid_property
     def uses_count(self):
-        return len(self.used_by)
+        return len(self.valid_used_by)
 
     @uses_count.expression
     def uses_count(cls):
         from uber.models.attendee import Attendee
-        return select([func.count(Attendee.id)]).where(Attendee.promo_code_id == cls.id).label('uses_count')
+        return select([func.count(Attendee.id)]).where(Attendee.promo_code_id == cls.id
+                                                       ).where(Attendee.is_valid == True  # noqa: E712
+                                                               ).label('uses_count')
 
     @property
     def uses_count_str(self):
@@ -427,6 +463,16 @@ class PromoCode(MagModel):
         uses = self.uses_remaining
         return 'Unlimited uses' if uses is None else '{} use{} remaining'.format(uses, '' if uses == 1 else 's')
 
+    @hybrid_property
+    def refunded(self):
+        return self.used_by and self.used_by[0].badge_status == c.REFUNDED_STATUS
+
+    @refunded.expression
+    def refunded(cls):
+        from uber.models import Attendee
+        return exists().select_from(Attendee).where(cls.id == Attendee.promo_code_id
+                                                    ).where(Attendee.badge_status == c.REFUNDED_STATUS)
+
     @presave_adjustment
     def _attribute_adjustments(self):
         # If 'uses_allowed' is empty, then this is an unlimited use code
@@ -434,7 +480,7 @@ class PromoCode(MagModel):
             self.uses_allowed = None
 
         # If 'discount' is empty, then this is a full discount, free badge
-        if self.discount == '':
+        if not self.discount:
             self.discount = None
 
         self.code = self.code.strip() if self.code else ''

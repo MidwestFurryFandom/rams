@@ -1,19 +1,19 @@
 import cherrypy
 from pockets import listify
-from six import string_types
 
 from uber.config import c
 from uber.decorators import ajax, all_renderable, credit_card, public
-from uber.errors import HTTPRedirect
 from uber.models import ArbitraryCharge, Attendee, MerchDiscount, MerchPickup, \
-    MPointsForCash, NoShirt, OldMPointExchange, Sale, Session
-from uber.utils import check, check_csrf, Charge, hour_day_format
-    
+    MPointsForCash, NoShirt, OldMPointExchange
+from uber.utils import check, check_csrf
+from uber.payments import TransactionRequest
+
+
 @all_renderable()
 class Root:
     def index(self, message=''):
         return {'message': message}
-    
+
     @public
     def arbitrary_charge_form(self, message='', amount=None, description='', email='', sale_id=None):
         charge = False
@@ -33,29 +33,28 @@ class Root:
             'description': description,
             'sale_id': sale_id
         }
-    
+
     @public
     @ajax
     def cancel_arbitrary_charge(self, session, stripe_id):
         # Arbitrary charges have no stripe ID yet and so can't actually be cancelled
         return {'message': 'Payment cancelled.'}
-    
+
     @public
     @ajax
     @credit_card
     def arbitrary_charge(self, session, id, amount, description, email, return_to='arbitrary_charge_form'):
-        charge = Charge(amount=100 * int(amount), description=description, receipt_email=email)
-        stripe_intent = charge.create_stripe_intent()
-        message = stripe_intent if isinstance(stripe_intent, string_types) else ''
+        charge = TransactionRequest(description=description, receipt_email=email, amount=100 * int(amount))
+        message = charge.create_stripe_intent()
         if message:
             return {'error': message}
         else:
             session.add(ArbitraryCharge(
-                amount=charge.dollar_amount,
+                amount=int(charge.dollar_amount),
                 what=charge.description,
                 reg_station=cherrypy.session.get('reg_station')
             ))
-            return {'stripe_intent': stripe_intent,
+            return {'stripe_intent': charge.intent,
                     'success_url': '{}?message={}'.format(return_to, 'Charge successfully processed'),
                     'cancel_url': 'cancel_arbitrary_charge'}
 
@@ -110,7 +109,7 @@ class Root:
                     got_merch = attendee.got_staff_merch
                 else:
                     merch, got_merch = attendee.merch, attendee.got_merch
-                
+
                 if staff_merch and c.STAFF_SHIRT_OPTS != c.SHIRT_OPTS:
                     shirt_size = c.STAFF_SHIRTS[attendee.staff_shirt]
                 else:
@@ -149,9 +148,9 @@ class Root:
 
                     message = '{a.full_name} ({a.badge}) has not yet received their merch.'.format(a=attendee)
                     if attendee.amount_unpaid and not staff_merch:
-                        merch_items.insert(0, 
-                                           'WARNING: Attendee is not fully paid up and may not have paid for their merch. '
-                                           'Please contact Registration.')
+                        merch_items.insert(0,
+                                           'WARNING: Attendee is not fully paid up and may not have paid for their '
+                                           'merch. Please contact Registration.')
 
         return {
             'id': id,
@@ -159,7 +158,6 @@ class Root:
             'message': message,
             'merch_items': merch_items,
             'gets_swadge': gets_swadge,
-            'swadges_available': c.SWADGES_AVAILABLE
         }
 
     @ajax
@@ -218,7 +216,6 @@ class Root:
             attendee.got_staff_merch = False
         else:
             attendee.got_merch = attendee.got_swadge = False
-            c._swadges_available = False  # force db check next time
         if attendee.no_shirt:
             session.delete(attendee.no_shirt)
         session.commit()
@@ -251,7 +248,7 @@ class Root:
         session.add(discount)
         session.commit()
         return {'success': True, 'message': 'Discount on badge #{} has been marked as redeemed.'.format(badge_num)}
-    
+
     @ajax
     def record_mpoint_cashout(self, session, badge_num, amount):
         try:
