@@ -1,6 +1,6 @@
 import checkdigit.verhoeff as verhoeff
 import pytz
-from spin_rest_utils import utils as spin_rest_utils
+import spin_rest_utils
 from typing import Iterable
 from collections import OrderedDict
 from datetime import datetime, timedelta
