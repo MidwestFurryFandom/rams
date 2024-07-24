@@ -180,6 +180,27 @@ class Root:
 
         raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}', model.id,
                            "{} receipt created.".format("Blank" if blank else "Default"))
+    
+    def edit_receipt_item(self, session, **params):
+        item = session.receipt_item(params)
+        txn_id = params.get('receipt_txn_id', None)
+
+        if txn_id:
+            receipt_txn = session.receipt_transaction(params.get('receipt_txn_id'))
+            item.receipt_txn = receipt_txn
+            if not item.closed:
+                item.closed = receipt_txn.added()
+        elif txn_id == '':
+            item.closed = None
+            item.receipt_txn = None
+        
+        message = check(item)
+        model = session.get_model_by_receipt(item.receipt)
+        if message:
+            session.rollback()
+        else:
+            message = "Receipt item updated."
+        raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}', model.id, message)
 
     @ajax
     def add_receipt_item(self, session, id='', **params):
@@ -403,8 +424,11 @@ class Root:
 
         if (receipt.item_total - receipt.txn_total) <= 0 and amount > 0:
             for item in receipt.open_receipt_items:
-                item.txn_id = item.txn_id or new_txn.id
-                item.closed = datetime.now()
+                if item.receipt_txn:
+                    item.closed = item.receipt_txn.added
+                else:
+                    item.txn_id = new_txn.id
+                    item.closed = new_txn.added
                 session.add(item)
             if isinstance(model, Attendee) and model.paid == c.NOT_PAID:
                 model.paid = c.HAS_PAID

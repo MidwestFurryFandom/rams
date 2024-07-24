@@ -381,6 +381,10 @@ class Config(_Overridable):
     @property
     def ART_SHOW_OPEN(self):
         return self.AFTER_ART_SHOW_REG_START and self.BEFORE_ART_SHOW_DEADLINE
+    
+    @property
+    def ART_SHOW_HAS_FEES(self):
+        return c.COST_PER_PANEL or c.COST_PER_TABLE or c.ART_MAILING_FEE
 
     @property
     def SELF_SERVICE_REFUNDS_OPEN(self):
@@ -1583,7 +1587,8 @@ c.JAVASCRIPT_INCLUDES = []
 # relative URL of the resource (e.g., theme/prereg.css) and the value is the hash for that resource
 c.STATIC_HASH_LIST = {}
 
-
+if not c.ALLOW_SHARED_TABLES:
+    c.DEALER_STATUS_OPTS = [(key, val) for key, val in c.DEALER_STATUS_OPTS if key != c.SHARED]
 dealer_status_label_lookup = {val: key for key, val in c.DEALER_STATUS_OPTS}
 c.DEALER_EDITABLE_STATUSES = [dealer_status_label_lookup[name] for name in c.DEALER_EDITABLE_STATUS_LIST]
 c.DEALER_CANCELLABLE_STATUSES = [dealer_status_label_lookup[name] for name in c.DEALER_CANCELLABLE_STATUS_LIST]
