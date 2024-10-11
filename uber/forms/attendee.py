@@ -9,7 +9,7 @@ from wtforms.validators import ValidationError, StopValidation
 
 from uber.config import c
 from uber.forms import (AddressForm, MultiCheckbox, MagForm, SelectAvailableField, SwitchInput, NumberInputGroup,
-                        HiddenBoolField, HiddenIntField, CustomValidation)
+                        HiddenBoolField, HiddenIntField, CustomValidation, Ranking)
 from uber.custom_tags import popup_link
 from uber.badge_funcs import get_real_badge_type
 from uber.models import Attendee, Session, PromoCodeGroup
@@ -18,7 +18,8 @@ from uber.utils import get_age_conf_from_birthday
 
 
 __all__ = ['AdminBadgeExtras', 'AdminBadgeFlags', 'AdminConsents', 'AdminStaffingInfo', 'BadgeExtras',
-           'BadgeFlags', 'BadgeAdminNotes', 'PersonalInfo', 'PreregOtherInfo', 'OtherInfo', 'StaffingInfo', 'Consents']
+           'BadgeFlags', 'BadgeAdminNotes', 'PersonalInfo', 'PreregOtherInfo', 'OtherInfo', 'StaffingInfo',
+           'Consents']
 
 
 # TODO: turn this into a proper validation class
@@ -102,18 +103,18 @@ class PersonalInfo(AddressForm, MagForm):
 
     def get_optional_fields(self, attendee, is_admin=False):
         if attendee.valid_placeholder and (is_admin or cherrypy.request.method == 'POST'):
-            return self.placeholder_optional_field_names() + ['badge_printed_name', 'cellphone']
+            return self.placeholder_optional_field_names() + ['badge_printed_name', 'cellphone', 'confirm_email']
         if is_admin and attendee.unassigned_group_reg:
             return ['first_name', 'last_name', 'email', 'badge_printed_name',
                     'cellphone', 'confirm_email'] + self.placeholder_optional_field_names()
 
         optional_list = super().get_optional_fields(attendee, is_admin)
 
-        if not attendee.needs_pii_consent and not attendee.badge_status == c.PENDING_STATUS:
+        if is_admin or not attendee.needs_pii_consent and attendee.badge_status != c.PENDING_STATUS:
             optional_list.append('confirm_email')
 
-        if attendee.badge_type not in c.PREASSIGNED_BADGE_TYPES or (c.PRINTED_BADGE_DEADLINE
-                                                                    and c.AFTER_PRINTED_BADGE_DEADLINE):
+        if not attendee.has_personalized_badge or (c.PRINTED_BADGE_DEADLINE
+                                                   and c.AFTER_PRINTED_BADGE_DEADLINE):
             optional_list.append('badge_printed_name')
 
         if self.same_legal_name.data:
@@ -301,7 +302,7 @@ class OtherInfo(MagForm):
             with Session() as session:
                 code = session.lookup_promo_code(field.data)
                 if not code:
-                    group = session.lookup_promo_or_group_code(field.data, PromoCodeGroup)
+                    group = session.lookup_registration_code(field.data, PromoCodeGroup)
                     if not group:
                         raise ValidationError("The promo code you entered is invalid.")
                     elif not group.valid_codes:
@@ -309,7 +310,7 @@ class OtherInfo(MagForm):
                 else:
                     if code.is_expired:
                         raise ValidationError("That promo code has expired.")
-                    elif code.uses_remaining <= 0 and not code.is_unlimited:
+                    elif not code.is_unlimited and code.uses_remaining <= 0:
                         raise ValidationError("That promo code has been used already.")
 
 
@@ -494,7 +495,7 @@ class CheckInForm(MagForm):
     badge_type = HiddenIntField('Badge Type')
     badge_num = StringField('Badge Number', id="checkin_badge_num", default='', validators=[
         validators.DataRequired('Badge number is required.'),
-    ])
+    ] if c.NUMBERED_BADGES else [])
     badge_printed_name = PersonalInfo.badge_printed_name
     got_merch = AdminBadgeExtras.got_merch
     got_staff_merch = AdminStaffingInfo.got_staff_merch
@@ -502,8 +503,8 @@ class CheckInForm(MagForm):
     def get_optional_fields(self, attendee, is_admin=False):
         optional_list = super().get_optional_fields(attendee, is_admin)
 
-        if attendee.badge_type not in c.PREASSIGNED_BADGE_TYPES or (c.PRINTED_BADGE_DEADLINE and
-                                                                    c.AFTER_PRINTED_BADGE_DEADLINE):
+        if not attendee.has_personalized_badge or (c.PRINTED_BADGE_DEADLINE and
+                                                   c.AFTER_PRINTED_BADGE_DEADLINE):
             optional_list.append('badge_printed_name')
 
         return optional_list
