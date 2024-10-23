@@ -116,7 +116,7 @@ class Tracking(MagModel):
                     return ''
                 opts = dict(column.type.choices)
                 value_opts = map(lambda s: int(s or 0), str(value).split(','))
-                return repr(','.join(opts[i] for i in value_opts if i in opts))
+                return repr(','.join(str(opts.get(i, opts.get(str(i), f"Unknown ({i})"))) for i in value_opts))
             elif isinstance(column.type, Choice) and value not in [None, '']:
                 opts = dict(column.type.choices)
                 return repr(opts.get(int(value), '<nonstandard>'))
@@ -129,7 +129,12 @@ class Tracking(MagModel):
     def differences(cls, instance):
         diff = {}
         for attr, column in instance.__table__.columns.items():
+            if attr in ['currently_sending', 'last_send_time', 'unapproved_count', 'last_updated', 'last_synced']:
+                continue
+
             new_val = getattr(instance, attr)
+            if new_val:
+                new_val = instance.coerce_column_data(column, new_val)
             old_val = instance.orig_value_of(attr)
             if old_val != new_val:
                 """
@@ -200,10 +205,6 @@ class Tracking(MagModel):
             data = cls.format(diff)
             if len(diff) == 1 and 'badge_num' in diff and c.SHIFT_CUSTOM_BADGES:
                 action = c.AUTO_BADGE_SHIFT
-            if isinstance(instance, AutomatedEmail) and not diff.keys().isdisjoint(("currently_sending",
-                                                                                    "last_send_time",
-                                                                                    "unapproved_count")):
-                return
             elif not data:
                 return
         else:
@@ -251,7 +252,7 @@ class TxnRequestTracking(MagModel):
     workstation_num = Column(Integer, default=0)
     terminal_id = Column(UnicodeText)
     who = Column(UnicodeText)
-    requested = Column(UTCDateTime, server_default=utcnow())
+    requested = Column(UTCDateTime, server_default=utcnow(), default=lambda: datetime.now(UTC))
     resolved = Column(UTCDateTime, nullable=True)
     success = Column(Boolean, default=False)
     response = Column(MutableDict.as_mutable(JSONB), default={})
