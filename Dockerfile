@@ -1,6 +1,6 @@
 # syntax = docker/dockerfile:1.4.0
 
-FROM python:3.12.3-alpine as build
+FROM python:3.13.3-alpine as build
 ARG PLUGINS="[]"
 ARG PLUGIN_NAMES="[]"
 WORKDIR /app
