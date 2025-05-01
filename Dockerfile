@@ -10,16 +10,11 @@ ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:
 ADD https://astral.sh/uv/install.sh /tmp/install-uv.sh
 RUN pip install setuptools==77.0.3
 
-# We're upgrading to edge because lxml comes with its own libxml2 which must match the system version for xmlsec to work
-# We can remove this once python ships a docker container with a libxml2 that matches lxml
-# Check lxml version with:
-# import lxml.etree
-# lxml.etree.LIBXML_VERSION
-# Alternatively, build lxml from source to link against system libxml2: RUN uv pip install --system --no-binary lxml lxml
-RUN --mount=type=cache,target=/var/cache/apk \
-    sed -i 's/v3.19/edge/' /etc/apk/repositories && \
-    apk --update-cache upgrade && \
-    apk add git libxml2 xmlsec-dev build-base jq curl && \
+RUN --mount=type=cache,target=/var/lib/apt/lists \
+    --mount=type=cache,target=/var/cache/apt \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    apt-get update && \
+    apt-get install -y libxml2-dev libxmlsec1-dev pkg-config build-essential dnsutils gettext-base postgresql-client libpq-dev vim jq git && \
     sh /tmp/install-uv.sh && \
     rm /tmp/install-uv.sh
 
