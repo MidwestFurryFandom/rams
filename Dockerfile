@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/var/lib/apt/lists \
     --mount=type=cache,target=/var/cache/apt \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     apk update && \
-    apk add git libxml2 xmlsec-dev build-base && \
+    apk add git libxml2 xmlsec-dev build-base jq curl && \
     sh /tmp/install-uv.sh && \
     rm /tmp/install-uv.sh
 
