@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
     sh /tmp/install-uv.sh && \
     rm /tmp/install-uv.sh
 
-RUN uv pip install --system --no-binary lxml lxml
+RUN $HOME/.local/bin/uv pip install --system --no-binary lxml lxml
 ADD requirements.txt /app/
 #RUN --mount=type=cache,target=/root/.cache \
 RUN $HOME/.local/bin/uv pip install --system -r requirements.txt;
