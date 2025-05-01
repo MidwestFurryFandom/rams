@@ -10,10 +10,14 @@ ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:
 ADD https://astral.sh/uv/install.sh /tmp/install-uv.sh
 RUN pip install setuptools==77.0.3
 
+RUN apk add --update --no-cache --virtual .build-deps g++ gcc libxml2-dev libxslt-dev python-dev && \
+    apk add --no-cache libxslt && \
+    pip install --no-cache-dir lxml>=3.5.0 && \
+    apk del .build-deps
+
 RUN --mount=type=cache,target=/var/cache/apk \
-    --mount=type=cache,target=/var/cache/apt \
     apk --update-cache upgrade && \
-    apk add git libxml2 xmlsec-dev build-base jq curl && \
+    apk add git build-base jq curl && \
     sh /tmp/install-uv.sh && \
     rm /tmp/install-uv.sh
 
