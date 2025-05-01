@@ -1,3 +1,5 @@
+--no-binary xmlsec
+--no-binary lxml
 alembic==1.13.1
 authorizenet @ git+https://github.com/magfest/sdk-python.git@f5af78f4332a2721ec1d204fec41c3fe5ff5f7b5
 aztec-code-generator==0.11
