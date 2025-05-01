@@ -13,8 +13,8 @@ RUN pip install setuptools==77.0.3
 RUN --mount=type=cache,target=/var/lib/apt/lists \
     --mount=type=cache,target=/var/cache/apt \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
-    apt-get update && \
-    apt-get install -y libxml2-dev libxmlsec1-dev pkg-config build-essential dnsutils gettext-base postgresql-client libpq-dev vim jq git && \
+    apk update && \
+    apk add libxml2-dev libxmlsec1-dev pkg-config build-essential dnsutils gettext-base postgresql-client libpq-dev vim jq git && \
     sh /tmp/install-uv.sh && \
     rm /tmp/install-uv.sh
 
