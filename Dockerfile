@@ -12,7 +12,7 @@ RUN pip install setuptools==77.0.3
 
 RUN --mount=type=cache,target=/var/cache/apk \
     apk --update-cache upgrade && \
-    apk add git build-base jq curl && \
+    apk add git build-base jq curl libxml2 libxslt && \
     sh /tmp/install-uv.sh && \
     rm /tmp/install-uv.sh
 
