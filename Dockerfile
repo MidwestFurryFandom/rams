@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
     sh /tmp/install-uv.sh && \
     rm /tmp/install-uv.sh
 
-RUN $HOME/.local/bin/uv --no-binary xmlsec,lxml python3-saml
+RUN $HOME/.local/bin/uv pip install --no-binary xmlsec,lxml python3-saml
 ADD requirements.txt /app/
 #RUN --mount=type=cache,target=/root/.cache \
 RUN $HOME/.local/bin/uv pip install --system -r requirements.txt;
