@@ -1,6 +1,6 @@
 # syntax = docker/dockerfile:1.4.0
 
-FROM python:3.13-alpine as build
+FROM python:3.14.0rc1-alpine as build
 ARG PLUGINS="[]"
 ARG PLUGIN_NAMES="[]"
 ARG LXML="6.0.0"
