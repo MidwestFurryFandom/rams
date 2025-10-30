@@ -481,6 +481,20 @@ class Root:
             'message': message
         }
     
+    def media_request(self, session, guest_id, message='', **params):
+        guest = session.guest_group(guest_id)
+        guest_media_request = session.guest_media_request(params, restricted=True)
+        if cherrypy.request.method == 'POST':
+            guest.media_request = guest_media_request
+            session.add(guest_media_request)
+            raise HTTPRedirect('index?id={}&message={}', guest.id, 'Thank you for completing the questionnaire!')
+
+        return {
+            'guest': guest,
+            'guest_media_request': guest.media_request or guest_media_request,
+            'message': message
+        }
+    
     def performer_badges(self, session, guest_id, message='', **params):
         guest = session.guest_group(guest_id)
         if cherrypy.request.method == 'POST':
@@ -500,7 +514,7 @@ class Root:
                 session.add(guest)
                 raise HTTPRedirect('index?id={}&message={}', guest.id, 'You have accepted the MIVS core hours.')
             else:
-                message = "Something is wrong with your group -- please contact us at {}.".format(c.MIVS_EMAIL)
+                message = "Something is wrong with your group -- please contact us at {}.".format(c.INDIE_SHOWCASE_EMAIL)
         return {
             'guest': guest,
             'message': message,
@@ -515,7 +529,7 @@ class Root:
                 session.add(guest)
                 raise HTTPRedirect('index?id={}&message={}', guest.id, 'Discussion email addresses updated.')
             else:
-                message = "Something is wrong with your group -- please contact us at {}.".format(c.MIVS_EMAIL)
+                message = "Something is wrong with your group -- please contact us at {}.".format(c.INDIE_SHOWCASE_EMAIL)
         return {
             'guest': guest,
             'message': message,
@@ -529,7 +543,7 @@ class Root:
                 session.add(guest)
                 raise HTTPRedirect('index?id={}&message={}', guest.id, 'You have confirmed that you read the handbook.')
             else:
-                message = "Something is wrong with your group -- please contact us at {}.".format(c.MIVS_EMAIL)
+                message = "Something is wrong with your group -- please contact us at {}.".format(c.INDIE_SHOWCASE_EMAIL)
         return {
             'guest': guest,
             'message': message,
@@ -550,6 +564,24 @@ class Root:
         return {
             'guest': guest,
             'message': message,
+        }
+
+    def mivs_logistics(self, session, guest_id, message='', **params):
+        guest = session.guest_group(guest_id)
+        if cherrypy.request.method == 'POST':
+            if guest.group.studio:
+                if 'confirm_checkbox' not in params:
+                    message = "You must confirm that you have filled out the Logistics form."
+                else:
+                    guest.group.studio.logistics_updated = True
+                    session.add(guest)
+                    raise HTTPRedirect('index?id={}&message={}', guest.id, 'Thanks for filling out the logistics form!')
+            else:
+                message = "Something is wrong with your group -- please contact us at {}.".format(c.INDIE_ARCADE_EMAIL)
+        return {
+            'guest': guest,
+            'message': message,
+            'confirm_checkbox': True if 'confirm_checkbox' in params or guest.group.studio.logistics_updated else False,
         }
 
     def mivs_hotel_space(self, session, guest_id, message='', **params):
@@ -580,7 +612,7 @@ class Root:
                                        guest.id,
                                        'Hotel needs updated.')
             else:
-                message = "Something is wrong with your group -- please contact us at {}.".format(c.MIVS_EMAIL)
+                message = "Something is wrong with your group -- please contact us at {}.".format(c.INDIE_SHOWCASE_EMAIL)
         return {
             'guest': guest,
             'message': message,
@@ -591,20 +623,20 @@ class Root:
         guest = session.guest_group(guest_id)
         if cherrypy.request.method == 'POST':
             if guest.group.studio:
-                if not params['selling_at_event']:
+                selling_preference = params.get('selling_merch', '')
+                if not selling_preference:
                     message = "Please select if you want to sell items at MAGFest or not."
-                elif params['selling_at_event'] == '1':
-                    if 'confirm_checkbox' not in params:
-                        message = "You must confirm that you have filled out the Google form provided."
+                elif int(selling_preference) == c.SELF_SELL and 'confirm_checkbox' not in params:
+                    message = "You must confirm that you have filled out the Google form provided."
 
                 if not message:
-                    guest.group.studio.selling_at_event = True if params['selling_at_event'] == '1' else False
+                    guest.group.studio.selling_merch = selling_preference
                     session.add(guest)
                     raise HTTPRedirect('index?id={}&message={}',
                                        guest.id,
                                        'Selling preferences updated.')
             else:
-                message = "Something is wrong with your group -- please contact us at {}.".format(c.MIVS_EMAIL)
+                message = "Something is wrong with your group -- please contact us at {}.".format(c.INDIE_SHOWCASE_EMAIL)
         return {
             'guest': guest,
             'message': message,
@@ -637,7 +669,7 @@ class Root:
                                        guest.id,
                                        'Thanks for confirming your studio and game information is up-to-date!')
             else:
-                message = "Something is wrong with your group -- please contact us at {}.".format(c.MIVS_EMAIL)
+                message = "Something is wrong with your group -- please contact us at {}.".format(c.INDIE_SHOWCASE_EMAIL)
         return {
             'guest': guest,
             'message': message,
@@ -671,14 +703,10 @@ class Root:
             name=track.filename,
             content_type=track.content_type)
 
-    def view_bio_pic(self, session, id):
-        guest = session.guest_group(id)
+    def view_image(self, session, id):
+        image = session.guest_image(id)
         cherrypy.response.headers['Cache-Control'] = 'no-store'
-        return serve_file(
-            guest.bio_pic.filepath,
-            disposition="attachment",
-            name=guest.bio_pic.download_filename,
-            content_type=guest.bio.pic_content_type)
+        return serve_file(image.filepath, name=image.filename, content_type=image.content_type)
 
     def view_stage_plot(self, session, id):
         guest = session.guest_group(id)

@@ -24,7 +24,7 @@ from uber.utils import filename_extension
 
 __all__ = [
     'GuestGroup', 'GuestInfo', 'GuestBio', 'GuestTaxes', 'GuestStagePlot',
-    'GuestPanel', 'GuestMerch', 'GuestCharity', 'GuestAutograph', 'GuestImage',
+    'GuestPanel', 'GuestMerch', 'GuestCharity', 'GuestAutograph', 'GuestImage', 'GuestMediaRequest',
     'GuestInterview', 'GuestTravelPlans', 'GuestDetailedTravelPlan', 'GuestHospitality', 'GuestTrack']
 
 
@@ -55,6 +55,7 @@ class GuestGroup(MagModel):
     interview = relationship('GuestInterview', backref=backref('guest', load_on_pending=True), uselist=False)
     travel_plans = relationship('GuestTravelPlans', backref=backref('guest', load_on_pending=True), uselist=False)
     hospitality = relationship('GuestHospitality', backref=backref('guest', load_on_pending=True), uselist=False)
+    media_request = relationship('GuestMediaRequest', backref=backref('guest', load_on_pending=True), uselist=False)
 
     email_model_name = 'guest'
 
@@ -96,6 +97,14 @@ class GuestGroup(MagModel):
                 checklist_items.append(item)
 
         return sorted(checklist_items, key=lambda i: self.deadline_from_model(i['name']))
+
+    def matches_showcases(self, showcases):
+        if self.group_type != c.MIVS or not self.group or not self.group.studio:
+            return
+        for game in self.group.studio.confirmed_games:
+            if game.showcase_type in showcases:
+                return True
+        return False
 
     @property
     def uses_detailed_travel_plans(self):
@@ -760,6 +769,11 @@ class GuestTravelPlans(MagModel):
 
 
 class GuestHospitality(MagModel):
+    guest_id = Column(UUID, ForeignKey('guest_group.id'), unique=True)
+    completed = Column(Boolean, default=False)
+
+
+class GuestMediaRequest(MagModel):
     guest_id = Column(UUID, ForeignKey('guest_group.id'), unique=True)
     completed = Column(Boolean, default=False)
 

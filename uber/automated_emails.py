@@ -543,7 +543,7 @@ def deferred_attendee_placeholder(a): return a.placeholder and (a.registered_loc
                                                                 and not a.admin_account)
 
 
-def panelist_placeholder(a): return a.placeholder and c.PANELIST_RIBBON in a.ribbon_ints
+def panelist_placeholder(a): return a.placeholder and a.badge_type != c.GUEST_BADGE and c.PANELIST_RIBBON in a.ribbon_ints
 
 
 def guest_placeholder(a): return a.placeholder and a.badge_type == c.GUEST_BADGE and (
@@ -854,7 +854,7 @@ if c.HOTEL_LOTTERY_STAFF_START:
     HotelLotteryEmailFixture(
         'Last chance to complete your staff hotel lottery entry',
         'hotel/lottery_reminder.html',
-        lambda a: a.status == c.PARTIAL and a.qualifies_for_staff_lottery,
+        lambda a: a.status == c.PARTIAL and a.qualifies_for_staff_lottery and days_after(1, a.entry_started)(),
         when=days_before(3, c.HOTEL_LOTTERY_STAFF_DEADLINE),
         ident='staff_hotel_lottery_reminder',
     )
@@ -863,10 +863,19 @@ if c.HOTEL_LOTTERY_STAFF_START:
 if c.HOTEL_LOTTERY_FORM_START:
     earliest_hotel_deadline = c.HOTEL_LOTTERY_FORM_WAITLIST if c.HOTEL_LOTTERY_FORM_WAITLIST else c.HOTEL_LOTTERY_FORM_DEADLINE
 
+    AutomatedEmailFixture(
+        Attendee,
+        'Did you want to enter the {EVENT_NAME} {EVENT_YEAR} hotel lottery?',
+        'hotel/enter_lottery.html',
+        lambda a: a.hotel_lottery_eligible and not a.lottery_application and days_after(1, a.registered)(),
+        when=days_before(7, earliest_hotel_deadline),
+        sender=c.HOTEL_LOTTERY_EMAIL,
+        ident='enter_hotel_lottery')
+
     HotelLotteryEmailFixture(
         'Last chance to complete your hotel lottery entry',
         'hotel/lottery_reminder.html',
-        lambda a: a.status == c.PARTIAL,
+        lambda a: a.status == c.PARTIAL and days_after(1, a.entry_started)(),
         when=days_before(3, earliest_hotel_deadline),
         ident='hotel_lottery_reminder',
     )
@@ -876,15 +885,14 @@ if c.HOTEL_LOTTERY_STAFF_START or c.HOTEL_LOTTERY_FORM_START:
     HotelLotteryEmailFixture(
         f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Notification',
         'hotel/award_notification.html',
-        lambda a: a.status == c.AWARDED and (
-            a.booking_url or a.parent_application and a.parent_application.booking_url),
+        lambda a: a.status == c.AWARDED and not a.final_status_hidden and a.booking_url_ready,
         ident='hotel_lottery_awarded'
     )
 
     HotelLotteryEmailFixture(
         f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Notification',
         'hotel/reject_notification.html',
-        lambda a: a.status == c.REJECTED,
+        lambda a: a.status == c.REJECTED and not a.final_status_hidden,
         ident='hotel_lottery_rejected'
     )
 
@@ -892,7 +900,7 @@ if c.HOTEL_LOTTERY_STAFF_START or c.HOTEL_LOTTERY_FORM_START:
         HotelLotteryEmailFixture(
             f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Notification',
             'hotel/reject_notification.html',
-            lambda a: a.status != c.PROCESSED and not a.finalized,
+            lambda a: a.status == c.COMPLETE and a.qualifies_for_first_round,
             when=after(c.HOTEL_LOTTERY_FORM_WAITLIST),
             ident='hotel_lottery_first_round_rejected'
         )
@@ -900,8 +908,8 @@ if c.HOTEL_LOTTERY_STAFF_START or c.HOTEL_LOTTERY_FORM_START:
     HotelLotteryEmailFixture(
         f'Reminder to confirm your {c.EVENT_NAME_AND_YEAR} hotel reservation',
         'hotel/guarantee_reminder.html',
-        lambda a: a.status == c.AWARDED and a.booking_url and days_before(
-            7, a.guarantee_deadline)() and not a.parent_application,
+        lambda a: a.status == c.AWARDED and a.booking_url_ready and \
+            days_before(7, a.guarantee_deadline)() and not a.parent_application,
         ident='hotel_lottery_guarantee_reminder'
     )
     
@@ -1030,6 +1038,19 @@ class RetroEmailFixture(AutomatedEmailFixture):
         AutomatedEmailFixture.__init__(self, *args, sender=c.INDIE_RETRO_EMAIL, **kwargs)
 
 
+class RetroGuestEmailFixture(AutomatedEmailFixture):
+    def __init__(self, subject, template, filter, ident, **kwargs):
+        AutomatedEmailFixture.__init__(
+            self,
+            GuestGroup,
+            subject,
+            template,
+            lambda mg: mg.group_type == c.MIVS and mg.group.studio and mg.matches_showcases[c.INDIE_RETRO] and filter(mg),
+            ident,
+            sender=c.INDIE_RETRO_EMAIL,
+            **kwargs)
+
+
 if c.INDIE_RETRO_START:
     RetroEmailFixture(
         IndieGame,
@@ -1044,6 +1065,13 @@ if c.INDIE_RETRO_START:
         'indie_retro/judge_welcome.html',
         lambda judge: judge.single_showcase == c.INDIE_RETRO,
         ident='retro_judge_welcome')
+    
+    RetroGuestEmailFixture(
+        '{EVENT_NAME} Indie Retro Checklist',
+        'indie_arcade/checklist_open.txt',
+        lambda mg: True,
+        ident='ia_checklist_open'
+    )
 
 
 class IAEmailFixture(AutomatedEmailFixture):
@@ -1060,7 +1088,7 @@ class IAGuestEmailFixture(AutomatedEmailFixture):
             GuestGroup,
             subject,
             template,
-            lambda mg: mg.group_type == c.MIVS and mg.group.studio and filter(mg),
+            lambda mg: mg.group_type == c.MIVS and mg.group.studio and mg.matches_showcases[c.INDIE_ARCADE] and filter(mg),
             ident,
             sender=c.INDIE_ARCADE_EMAIL,
             **kwargs)
@@ -1081,6 +1109,40 @@ if c.INDIE_ARCADE_START:
         lambda judge: judge.single_showcase == c.INDIE_ARCADE,
         ident='ia_judge_welcome')
 
+    IAEmailFixture(
+        IndieGame,
+        'Your game has been accepted into the MAGFest Indie Arcade',
+        'indie_arcade/game_accepted.txt',
+        lambda game: game.status == c.ACCEPTED and not game.waitlisted and game.showcase_type == c.INDIE_ARCADE,
+        ident='ia_game_accepted')
+
+    IAEmailFixture(
+        IndieGame,
+        'Your game has been accepted into the MAGFest Indie Arcade from our waitlist',
+        'indie_arcade/game_accepted_from_waitlist.txt',
+        lambda game: game.status == c.ACCEPTED and game.waitlisted and game.showcase_type == c.INDIE_ARCADE,
+        ident='ia_game_accepted_from_waitlist')
+
+    IAEmailFixture(
+        IndieGame,
+        'Your game application has been declined from the {c.EVENT_YEAR} Indie Arcade',
+        'indie_arcade/game_declined.txt',
+        lambda game: game.status == c.DECLINED and game.showcase_type == c.INDIE_ARCADE,
+        ident='ia_game_declined')
+
+    IAEmailFixture(
+        IndieGame,
+        'Your Indie Arcade application has been waitlisted',
+        'indie_arcade/game_waitlisted.txt',
+        lambda game: game.status == c.WAITLISTED and game.showcase_type == c.INDIE_ARCADE,
+        ident='ia_game_waitlisted')
+    
+    IAGuestEmailFixture(
+        '{EVENT_NAME} Indie Arcade Checklist',
+        'indie_arcade/checklist_open.txt',
+        lambda mg: True,
+        ident='ia_checklist_open'
+    )
 
 class MIVSEmailFixture(AutomatedEmailFixture):
     def __init__(self, *args, **kwargs):
@@ -1096,7 +1158,7 @@ class MIVSGuestEmailFixture(AutomatedEmailFixture):
             GuestGroup,
             subject,
             template,
-            lambda mg: mg.group_type == c.MIVS and mg.group.studio and filter(mg),
+            lambda mg: mg.group_type == c.MIVS and mg.group.studio and mg.matches_showcases[c.MIVS] and filter(mg),
             ident,
             sender=c.MIVS_EMAIL,
             **kwargs)
