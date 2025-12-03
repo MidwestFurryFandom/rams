@@ -623,38 +623,42 @@ class Config(_Overridable):
     @dynamic
     def FORMATTED_SINGLE_BADGES(self):
         badge_types = []
-        if self.ONE_DAYS_ENABLED:
-            if self.PRESELL_ONE_DAYS and c.BEFORE_PREREG_TAKEDOWN:
-                for day_name in ["Friday", "Saturday", "Sunday"]:
-                    new_opt = self.single_day_opt(day_name)
-                    badge_types += [new_opt] if new_opt is not None else []
-            elif self.PRESELL_ONE_DAYS and uber.utils.localized_now().date() >= self.EPOCH.date():
-                after_today = False
-                today_name = uber.utils.localized_now().strftime('%A')
-                for day_name in ["Friday", "Saturday", "Sunday"]:
-                    if after_today or day_name == today_name:
-                        new_opt = self.single_day_opt(day_name)
-                        badge_types += [new_opt] if new_opt is not None else []
-                        after_today = True
-            elif self.ONE_DAY_BADGE_AVAILABLE:
+        if self.ONE_DAYS_ENABLED and self.PRESELL_ONE_DAYS:
+            if "One Day" in self.PRESELL_ONE_DAYS:
                 badge_types.append({
                     'name': 'Single Day',
                     'desc': "Can be upgraded to an Attendee badge later.",
                     'value': c.ONE_DAY_BADGE,
                     'price': self.DEFAULT_SINGLE_DAY
                 })
+            else:
+                badge_types.extend(self.build_presold_one_days())
+        return badge_types
+    
+    def build_presold_one_days(self):
+        badge_types = []
+        day = max(uber.utils.localized_now(), self.EPOCH)
+        while day.date() <= self.ESCHATON.date():
+            day_name = day.strftime('%A')
+            if day_name in self.PRESELL_ONE_DAYS:
+                new_opt = self.single_day_opt(day_name)
+                badge_types += [new_opt] if new_opt is not None else []
+            day += timedelta(days=1)
         return badge_types
 
     @property
     def FORMATTED_BADGE_TYPES(self):
         badge_types = []
-        if c.AT_THE_CON and self.ONE_DAYS_ENABLED and self.ONE_DAY_BADGE_AVAILABLE:
-            badge_types.append({
-                'name': 'Single Day',
-                'desc': 'Can be upgraded to a weekend badge later.',
-                'value': c.ONE_DAY_BADGE,
-                'price': c.ONEDAY_BADGE_PRICE
-            })
+        if c.AT_THE_CON and self.ONE_DAYS_ENABLED:
+            if self.PRESELL_ONE_DAYS:
+                badge_types.extend(self.build_presold_one_days())
+            elif self.ONE_DAY_BADGE_AVAILABLE:
+                badge_types.append({
+                    'name': 'Single Day',
+                    'desc': 'Can be upgraded to an Attendee badge later.',
+                    'value': c.ONE_DAY_BADGE,
+                    'price': c.ONEDAY_BADGE_PRICE
+                })
         badge_types.append({
             'name': 'Attendee',
             'desc': 'Allows access to the convention for its duration.',
@@ -1356,6 +1360,66 @@ class Config(_Overridable):
                 return panels_dept.id
             else:
                 return c.PANELS
+
+    @request_cached_property
+    @dynamic
+    def SCHEDULE_LOCATION_OPTS(self):
+        from uber.models import Session, EventLocation
+        opt_list = []
+
+        with Session() as session:
+            event_locations = session.query(EventLocation)
+
+            if not event_locations.count():
+                return opt_list
+
+            for location in event_locations:
+                opt_list.append((location.id, location.schedule_name))
+        
+        return opt_list
+    
+    @request_cached_property
+    @dynamic
+    def SCHEDULE_LOCATIONS(self):
+        return {key: name for key, name in self.SCHEDULE_LOCATION_OPTS}
+    
+    @request_cached_property
+    @dynamic
+    def ROOM_TRIE(self):
+        def make_room_trie(rooms):
+            root = nesteddefaultdict()
+            for index, (location, description) in enumerate(rooms):
+                for word in filter(lambda s: s, re.split(r'\W+', description)):
+                    current_dict = root
+                    current_dict['__rooms__'][location] = index
+                    for letter in word:
+                        current_dict = current_dict.setdefault(letter.lower(), nesteddefaultdict())
+                        current_dict['__rooms__'][location] = index
+            return root
+
+        return make_room_trie(c.SCHEDULE_LOCATION_OPTS)
+
+    @request_cached_property
+    @dynamic
+    def EVENT_DEPTS_OPTS(self):
+        from uber.models import Session, Department
+        opt_list = []
+
+        with Session() as session:
+            event_depts = session.query(Department)
+
+            if not event_depts.count():
+                return opt_list
+
+            for dept in event_depts:
+                opt_list.append((dept.id, dept.name))
+        
+        return opt_list
+    
+    @request_cached_property
+    @dynamic
+    def EVENT_DEPTS(self):
+        return {key: name for key, name in self.EVENT_DEPTS_OPTS}
 
     @request_cached_property
     @dynamic
@@ -2094,36 +2158,10 @@ c.PANEL_SCHEDULE_LENGTH = int((c.PANELS_ESCHATON - c.PANELS_EPOCH).total_seconds
 c.EVENT_START_TIME_OPTS = [(dt, dt.strftime('%I %p %a') if not dt.minute else dt.strftime('%I:%M %a'))
                            for dt in [c.EPOCH + timedelta(minutes=i * 30) for i in range(c.PANEL_SCHEDULE_LENGTH)]]
 c.EVENT_DURATION_OPTS = [(i, '%.1f hour%s' % (i/2, 's' if i != 2 else '')) for i in range(1, 19)]
-
-c.ORDERED_EVENT_LOCS = [loc for loc, desc in c.EVENT_LOCATION_OPTS]
 c.EVENT_BOOKED = {'colspan': 0}
 c.EVENT_OPEN = {'colspan': 1}
 
 c.PRESENTATION_OPTS.sort(key=lambda tup: 'zzz' if tup[0] == c.OTHER else tup[1])
-
-
-def _make_room_trie(rooms):
-    root = nesteddefaultdict()
-    for index, (location, description) in enumerate(rooms):
-        for word in filter(lambda s: s, re.split(r'\W+', description)):
-            current_dict = root
-            current_dict['__rooms__'][location] = index
-            for letter in word:
-                current_dict = current_dict.setdefault(letter.lower(), nesteddefaultdict())
-                current_dict['__rooms__'][location] = index
-    return root
-
-
-c.ROOM_TRIE = _make_room_trie(c.EVENT_LOCATION_OPTS)
-
-invalid_rooms = [room for room in (c.PANEL_ROOMS + c.MUSIC_ROOMS) if not getattr(c, room.upper(), None)]
-
-for room in invalid_rooms:
-    log.warning('config: panels_room config problem: '
-                'Ignoring {!r} because it was not also found in [[event_location]] section.'.format(room.upper()))
-
-c.PANEL_ROOMS = [getattr(c, room.upper()) for room in c.PANEL_ROOMS if room not in invalid_rooms]
-c.MUSIC_ROOMS = [getattr(c, room.upper()) for room in c.MUSIC_ROOMS if room not in invalid_rooms]
 
 
 # =============================

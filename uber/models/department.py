@@ -212,6 +212,8 @@ class Department(MagModel):
 
     jobs = relationship('Job', backref='department')
     job_templates = relationship('JobTemplate', backref='department')
+    locations = relationship('EventLocation', backref='department')
+    events = relationship('Event', backref='department')
 
     dept_checklist_items = relationship('DeptChecklistItem', backref='department')
     dept_roles = relationship('DeptRole', backref='department')
@@ -575,7 +577,26 @@ class Job(MagModel):
 
     @property
     def is_teardown(self):
-        return self.start_time >= c.ESCHATON
+        return self.end_time >= c.ESCHATON
+
+    @property
+    def hotel_night(self):
+        # Determines what hotel night this job qualifies a staffer for
+        start_time = self.start_time_local
+        start_day_before = start_time - timedelta(days=1)
+        end_day_before = self.end_time_local - timedelta(days=1)
+        hotel_night = getattr(c, start_time.strftime('%A').upper())
+
+        if start_time.date() < c.EPOCH.date():
+            return hotel_night if hotel_night in c.SETUP_NIGHTS else 0
+        elif self.end_time_local.date() > c.ESCHATON.date():
+            return getattr(c, end_day_before.strftime('%A').upper())
+        else:
+            if start_time.date() == c.EPOCH.date() and start_time.hour < 9:
+                return getattr(c, start_day_before.strftime('%A').upper())
+            elif start_time.date() == c.ESCHATON.date():
+                return hotel_night if self.end_time_local.hour >= 5 else getattr(c, end_day_before.strftime('%A').upper())
+            return hotel_night
 
     @property
     def real_duration(self):
@@ -755,12 +776,14 @@ class JobTemplate(MagModel):
         # Storing these now prevents extra hits to the DB
         old_open_time = self.orig_value_of('open_time')
         old_close_time = self.orig_value_of('close_time')
-        old_days = self.orig_value_of('days')
+        
+        old_days_ints = set([int(i) for i in str(self.orig_value_of('days')).split(',') if i])
 
-        if old_days != self.days:
-            old_days_ints = set([int(i) for i in str(old_days).split(',') if i])
-            delete_days = old_days_ints - self.days_ints
-            add_days = self.days_ints - old_days_ints
+        new_days_ints = set(self.days_ints)
+
+        if old_days_ints != new_days_ints:
+            delete_days = old_days_ints - new_days_ints
+            add_days = new_days_ints - old_days_ints
 
             if delete_days:
                 jobs_by_date = session.query(

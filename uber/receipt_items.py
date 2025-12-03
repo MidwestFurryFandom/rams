@@ -251,8 +251,9 @@ def overridden_badge_cost(attendee, new_attendee=None):
     if attendee.paid == c.PAID_BY_GROUP and new_attendee.paid == c.PAID_BY_GROUP:
         return
 
-    old_cost = attendee.calculate_badge_cost() * 100
-    new_cost = new_attendee.calculate_badge_cost() * 100
+    # Check paid by group for converting dealer badges
+    old_cost = 0 if attendee.paid == c.PAID_BY_GROUP else attendee.calculate_badge_cost() * 100
+    new_cost = 0 if new_attendee.paid == c.PAID_BY_GROUP else new_attendee.calculate_badge_cost() * 100
 
     if old_cost == new_cost:
         return
@@ -418,7 +419,8 @@ def age_discount_credit(attendee, new_attendee=None):
             diff = attendee.age_discount * 100
         return ("Age Discount", diff, c.BADGE_DISCOUNT)
     
-    if needs_badge_change_calc(attendee) or needs_badge_change_calc(new_attendee):
+    if attendee.badge_type != new_attendee.badge_type and (needs_badge_change_calc(attendee) or
+                                                           needs_badge_change_calc(new_attendee)):
         # Age discount is included in the badge upgrade/downgrade function
         return
     

@@ -12,7 +12,6 @@
 </style>
 
 <script type="text/javascript" src="../static_views/ratings.js"></script>
-{% include 'shifts_admin/shift_comment_modal.html'%}
 
 <script type="text/javascript">
     $(function () {
@@ -51,14 +50,15 @@
 
     var SHIFTS = {{ shifts|jsonize }};
     $(function() {
-        setupShiftRatingClickHandler();
+        RatingModule.setupShiftRatingClickHandler();
 
         var onShiftStatusChanged = function(job, shift) {
-            $('#shift_status_' + shift.id).empty().append(renderShiftStatus(shift, onShiftStatusChanged));
-            $('#shift_rating_' + shift.id).empty().append(renderShiftRating(shift.id));
+            $('#shift_status_' + shift.id).empty().append(RatingModule.renderShiftStatus(shift, onShiftStatusChanged));
+            $('#shift_rating_' + shift.id).empty().append(RatingModule.renderShiftRating(shift.id));
         };
 
         $.each(SHIFTS, function(id, shift) {
+            RatingModule.renderCommentRow(shift, 9);
             onShiftStatusChanged({}, shift);
         });
     });
@@ -145,6 +145,8 @@
               </form>
             </td>
           </tr>
+            <tr id="shift_comment_{{ shift.id }}" style="display:none;">
+            </tr>
         {% endfor %}
       </tbody>
     </table>

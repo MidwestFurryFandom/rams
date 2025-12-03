@@ -109,8 +109,6 @@ def check_duplicate_registrations():
                         for a in unpaid:
                             session.delete(a)
                         del dupes[who]
-                    for a in paid:
-                        a.badge_status = c.NEW_STATUS
 
                 if dupes and session.no_email(subject):
                     body = render('emails/daily_checks/duplicates.html',
@@ -124,21 +122,20 @@ def check_placeholder_registrations():
         emails = [[
             'Staff',
             c.STAFF_EMAIL,
-            Attendee.staffing == True,  # noqa: E712
-            Attendee.is_valid == True  # noqa: E712
+            (Attendee.staffing == True, Attendee.is_valid == True)  # noqa: E712
         ], [
             'Panelist',
             c.PANELS_EMAIL,
-            or_(Attendee.badge_type == c.GUEST_BADGE, Attendee.ribbon.contains(c.PANELIST_RIBBON)),
-            Attendee.is_valid == True  # noqa: E712
+            (or_(Attendee.badge_type == c.GUEST_BADGE, Attendee.ribbon.contains(c.PANELIST_RIBBON)),
+            Attendee.is_valid == True)  # noqa: E712
         ], [
             'Attendee',
             c.REGDESK_EMAIL,
-            not_(or_(
+            (not_(or_(
                 Attendee.staffing == True,  # noqa: E712
                 Attendee.badge_type == c.GUEST_BADGE,
                 Attendee.ribbon.contains(c.PANELIST_RIBBON))),
-            Attendee.is_valid == True  # noqa: E712
+            Attendee.is_valid == True)  # noqa: E712
         ]]
 
         with Session() as session:
@@ -152,7 +149,7 @@ def check_placeholder_registrations():
                                            .filter(Attendee.placeholder == True,  # noqa: E712
                                                    Attendee.registered < localized_now() - timedelta(days=3),
                                                    Attendee.badge_status.in_([c.NEW_STATUS, c.COMPLETED_STATUS]),
-                                                   per_email_filter)
+                                                   *per_email_filter)
                                            .options(joinedload(Attendee.group))
                                            .order_by(Attendee.registered, Attendee.full_name).all())
                     if placeholders:

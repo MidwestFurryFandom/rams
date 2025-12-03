@@ -23,8 +23,6 @@ def _inconsistent_shoulder_shifts(session):
     shoulder_nights_missing_shifts = defaultdict(lambda: defaultdict(list))
 
     for attendee in query:
-        if attendee.is_dept_head:
-            continue
         approved_nights = set(attendee.hotel_requests.nights_ints)
         approved_shoulder_nights = approved_nights.difference(c.CORE_NIGHTS)
         shifts_by_night = defaultdict(list)
@@ -33,17 +31,12 @@ def _inconsistent_shoulder_shifts(session):
             job = shift.job
             dept = job.department
             departments.add(dept)
-            start_time = job.start_time.astimezone(c.EVENT_TIMEZONE)
-            shift_night = getattr(c, start_time.strftime('%A').upper())
-            shifts_by_night[shift_night].append(shift)
-
-            if start_time <= noon_datetime(start_time):
-                day_before = start_time - timedelta(days=1)
-                shift_night = getattr(c, day_before.strftime('%A').upper())
-                shifts_by_night[shift_night].append(shift)
+            shifts_by_night[job.hotel_night].append(shift)
 
         discrepencies = approved_shoulder_nights.difference(set(shifts_by_night.keys()))
         if discrepencies:
+            if not attendee.shifts:
+                shoulder_nights_missing_shifts['none'][attendee] = list(discrepencies)
             for dept in departments:
                 shoulder_nights_missing_shifts[dept][attendee] = list(discrepencies)
 
@@ -179,6 +172,15 @@ class Root:
         shoulder_nights_missing_shifts = _inconsistent_shoulder_shifts(session)
 
         departments = []
+        no_shifts_attendees = []
+        no_shifts = shoulder_nights_missing_shifts.pop('none', None)
+        if no_shifts:
+            for attendee in sorted(no_shifts, key=lambda a: a.full_name):
+                nights = no_shifts[attendee]
+                night_names = ' / '.join([c.NIGHTS[n] for n in c.NIGHT_DISPLAY_ORDER if n in nights])
+                attendee.night_names = night_names
+                no_shifts_attendees.append(attendee)
+
         for dept in sorted(set(shoulder_nights_missing_shifts.keys()), key=lambda d: d.name):
             dept_heads = sorted(dept.dept_heads, key=lambda a: a.full_name)
             dept_head_emails = ', '.join([
@@ -191,13 +193,25 @@ class Root:
                 night_names = ' / '.join([c.NIGHTS[n] for n in c.NIGHT_DISPLAY_ORDER if n in nights])
                 attendee.night_names = night_names
                 dept.inconsistent_attendees.append(attendee)
-        return {'departments': departments}
+        return {
+            'departments': departments,
+            'no_shifts': no_shifts,
+            'no_shifts_attendees': no_shifts_attendees,
+        }
 
     @csv_file
     def inconsistent_shoulder_shifts_csv(self, out, session):
         shoulder_nights_missing_shifts = _inconsistent_shoulder_shifts(session)
 
         rows = []
+        no_shifts = shoulder_nights_missing_shifts.pop('none', None)
+        if no_shifts:
+            for attendee in sorted(no_shifts, key=lambda a: a.full_name):
+                nights = no_shifts[attendee]
+                night_names = ' / '.join([c.NIGHTS[n] for n in c.NIGHT_DISPLAY_ORDER if n in nights])
+                attendee.night_names = night_names
+                rows.append(['No Shifts', attendee.full_name, attendee.email, night_names])
+        
         departments = set(shoulder_nights_missing_shifts.keys())
         for dept in sorted(departments, key=lambda d: d.name):
             for attendee in sorted(shoulder_nights_missing_shifts[dept], key=lambda a: a.full_name):

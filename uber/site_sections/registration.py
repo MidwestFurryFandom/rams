@@ -56,8 +56,8 @@ def load_attendee(session, params):
 
 def save_attendee(session, attendee, params):
     if cherrypy.request.method == 'POST':
-        receipt_items = ReceiptManager.auto_update_receipt(attendee,
-                                                           session.get_receipt_by_model(attendee), params.copy())
+        receipt_items = ReceiptManager.auto_update_receipt(
+            attendee, session.get_receipt_by_model(attendee), params.copy(), who=AdminAccount.admin_name() or 'non-admin')
         session.add_all(receipt_items)
 
     forms = load_forms(params, attendee, ['PersonalInfo', 'AdminBadgeExtras', 'AdminConsents', 'AdminStaffingInfo',
@@ -316,7 +316,8 @@ class Root:
                                     terminal_id=terminal_id,
                                     model_id=model_id,
                                     pickup_group_id=pickup_group_id,
-                                    description=description)
+                                    description=description,
+                                    who=AdminAccount.admin_name())
         return {'success': True}
 
     def check_txn_status(self, session, intent_id='', **params):
@@ -341,6 +342,7 @@ class Root:
         raise HTTPRedirect('../reg_admin/manage_workstations?message={}', message)
 
     @ajax
+    @any_admin_access
     def check_terminal_payment(self, session, model_id, model_name, **params):
         error, terminal_id = session.get_assigned_terminal_id()
         if error:
@@ -409,6 +411,7 @@ class Root:
         return {'success': True}
 
     @ajax
+    @any_admin_access
     def poll_terminal_payment(self, session, **params):
         import uber.spin_rest_utils as spin_rest_utils
         error, terminal_id = session.get_assigned_terminal_id()

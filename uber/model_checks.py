@@ -184,6 +184,8 @@ def time_conflicts(job):
 
 @validation.Job
 def no_negative_hours(job):
+    if not job.duration:
+        return 'Please enter a job duration.'
     if job.duration < 0:
         return 'You cannot create a job with negative hours.'
 
@@ -512,7 +514,8 @@ Event.required = [
 
 @validation.PanelApplication
 def app_deadline(app):
-    if localized_now() > c.PANELS_DEADLINE and not c.HAS_PANELS_ADMIN_ACCESS and (not app.group or not app.group.guest):
+    if localized_now() > c.PANELS_DEADLINE and not c.HAS_PANELS_ADMIN_ACCESS and not getattr(app, 'is_guest') and (
+            not app.group or not app.group.guest):
         return "We are now past the deadline and are no longer accepting panel applications."
 
 
@@ -544,12 +547,6 @@ def slug_not_existing(feature):
                                                    AttractionFeature.slug == slug).first():
             return f"Another attraction feature has an identical URL to this one ({slug}). \
                 Please make sure this feature's name is different from others, not including punctuation."
-
-
-@validation.AttractionEvent
-def at_least_one_slot(event):
-    if event.slots < 1:
-        return 'Events must have at least one slot.'
 
 
 # =============================
