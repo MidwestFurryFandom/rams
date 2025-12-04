@@ -18,7 +18,7 @@ from io import BytesIO
 
 from uber.config import c
 from uber.custom_tags import format_currency, readable_join
-from uber.decorators import ajax, all_renderable, credit_card, public
+from uber.decorators import ajax, ajax_gettable, all_renderable, credit_card, public
 from uber.errors import HTTPRedirect
 from uber.forms import load_forms
 from uber.models import AdminAccount, ArtShowApplication, ArtShowBidder, ArtShowPayment, ArtShowPiece, ArtShowReceipt, ArtShowPanel, \
@@ -614,7 +614,6 @@ class Root:
                 panels_or_tables = 'tables_ad'
                 assignments = 'mature_table_assignments'
 
-            artists = valid_apps.filter(ArtShowApplication.panels_ad > 0)
             for artist in artists:
                 artists_json.append(build_artist_json(artist, artist.mature_display_name,
                                                       getattr(artist, panels_or_tables, 0), getattr(artist, assignments, [])))
@@ -632,8 +631,8 @@ class Root:
             'surface_type': surface_type,
         }
     
-    @ajax
-    def save_map(self, session, gallery, surface_type, panels, assignments):
+    @ajax_gettable
+    def save_map(self, session, gallery, surface_type, panels, assignments, **params):
         panels = json.loads(panels)
         assignments = json.loads(assignments)
         assignments_by_panel = {}
