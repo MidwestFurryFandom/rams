@@ -199,7 +199,7 @@ class Root:
                 session.add(found_piece)
                 session.commit()
             elif action == 'get_info':
-                message = f"ERROR: Piece {found_piece.artist_and_piece_id} information retrieved."
+                message = f"Piece {found_piece.artist_and_piece_id} information retrieved."
                 found_piece.history = session.query(Tracking).filter_by(fk_id=found_piece.id)
             elif action == 'set_winner':
                 if not bidder_num:
@@ -1005,7 +1005,7 @@ class Root:
                     raise HTTPRedirect('sales_search?message={}', 'Please search by bidder number or badge number.')
                 else:
                     filters.append(or_(BadgeInfo.ident == badge_num))
-                attendees = session.query(Attendee).join(BadgeInfo).filter(*filters)
+                attendees = session.query(Attendee).filter(*filters)
         else:
             attendees = session.query(Attendee).join(Attendee.art_show_receipts)
 
@@ -1063,7 +1063,7 @@ class Root:
             .filter_by(reg_station_id=reg_station_id or -1).first()
 
         if search_text:
-            if re.match(r'^[a-zA-Z]-[0-9]+', search_text):
+            if re.match(r'^[a-zA-Z]+-[0-9]+', search_text):
                 artist_id, piece_id = search_text.split('-')
                 pieces = session.query(ArtShowPiece).join(ArtShowPiece.app).filter(
                     ArtShowPiece.piece_id == int(piece_id),
