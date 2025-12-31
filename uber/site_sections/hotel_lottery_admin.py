@@ -11,7 +11,8 @@ from pockets.autolog import log
 from residue import CoerceUTF8 as UnicodeText
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import joinedload
-from ortools.linear_solver import pywraplp
+if c.HOTEL_LOTTERY_ROOM_INVENTORY:
+    from ortools.linear_solver import pywraplp
 
 from uber.config import c
 from uber.custom_tags import datetime_local_filter
