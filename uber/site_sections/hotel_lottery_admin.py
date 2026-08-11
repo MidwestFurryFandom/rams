@@ -1,26 +1,28 @@
 import base64
 import pycountry
 import cherrypy
+import logging
 import random
 import math
 from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime, timedelta
 from dateutil import parser as dateparser
-from pockets.autolog import log
-from residue import CoerceUTF8 as UnicodeText
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import joinedload
+from sqlalchemy.types import String
 from ortools.linear_solver import pywraplp
 
 from uber.config import c
 from uber.custom_tags import datetime_local_filter
 from uber.decorators import all_renderable, log_pageview, ajax, xlsx_file, csv_file, multifile_zipfile, render
+from uber.email import EmailService
 from uber.errors import HTTPRedirect
 from uber.forms import load_forms
 from uber.models import Attendee, Group, LotteryApplication, Email, Tracking, PageViewTracking
-from uber.tasks.email import send_email
 from uber.utils import Order, get_page, localized_now, validate_model, get_age_from_birthday, normalize_email_legacy
+
+log = logging.getLogger(__name__)
 
 def _search(session, text):
     applications = session.query(LotteryApplication)
@@ -31,7 +33,7 @@ def _search(session, text):
             return applications.filter(or_(LotteryApplication.confirmation_num == terms[0])), ''
     
     check_list = []
-    for attr in [col for col in LotteryApplication().__table__.columns if isinstance(col.type, UnicodeText)]:
+    for attr in [col for col in LotteryApplication().__table__.columns if isinstance(col.type, String)]:
         check_list.append(attr.ilike('%' + text + '%'))
 
     for col_name in ['assigned_hotel', 'assigned_room_type', 'assigned_suite_type']:
@@ -269,7 +271,7 @@ class Root:
         elif isinstance(form_list, str):
             form_list = [form_list]
         forms = load_forms(params, application, form_list)
-        all_errors = validate_model(forms, application, is_admin=True)
+        all_errors = validate_model(session, forms, application, is_admin=True)
         if all_errors:
             return {"error": all_errors}
 
@@ -318,13 +320,18 @@ class Root:
         application = session.lottery_application(id)
         return {
             'application':  application,
-            'emails': session.query(Email).filter(Email.model == 'LotteryApplication',
-                                                  Email.fk_id == id
-                                                  ).order_by(Email.when).all(),
             'changes': session.query(Tracking).filter(Tracking.model == 'LotteryApplication', Tracking.fk_id == id
                                                       ).order_by(Tracking.when).all(),
             'pageviews': session.query(PageViewTracking).filter(PageViewTracking.which == repr(application)
                                                                 ).order_by(PageViewTracking.when).all(),
+        }
+    
+    def emails(self, session, id):
+        application = session.lottery_application(id)
+        return {
+            'application':  application,
+            'emails': session.query(Email).filter(Email.fk_id == id).order_by(Email.generated).all(),
+            'depts_by_sender': EmailService.emails_from_depts(session),
         }
     
     def show_awards(self, session, **params):

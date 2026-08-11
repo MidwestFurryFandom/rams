@@ -1,7 +1,7 @@
 from collections import Counter, defaultdict, OrderedDict
 
 from geopy.distance import geodesic
-from pockets.autolog import log
+import logging
 import six
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
@@ -11,6 +11,8 @@ from uber.config import c
 from uber.decorators import ajax, all_renderable, csv_file, not_site_mappable
 from uber.jinja import JinjaEnv
 from uber.models import Attendee, Group, PromoCode
+
+log = logging.getLogger(__name__)
 
 
 @JinjaEnv.jinja_filter
@@ -176,6 +178,10 @@ class Root:
             badge_type = getattr(c, var)
             counts['badge_stocks'][c.BADGES[badge_type]] = badge_stocks.get(var.lower(), 'no limit set')
             counts['badge_counts'][c.BADGES[badge_type]] = c.get_badge_count_by_type(badge_type)
+            if badge_type == c.ATTENDEE_BADGE:
+                counts['reserved_badges'][c.BADGES[badge_type]] = c.get_badge_promo_codes()
+            else:
+                counts['reserved_badges'][c.BADGES[badge_type]] = c.get_comped_promo_codes(badge_type)
 
         shirt_stocks = c.SHIRT_SIZE_STOCKS
         for shirt_enum_key in c.PREREG_SHIRTS.keys():

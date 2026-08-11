@@ -6,9 +6,8 @@ import math
 import re
 from collections import defaultdict
 from datetime import datetime
-from pockets import groupify
-from residue import CoerceUTF8 as UnicodeText
 from sqlalchemy import or_, func, and_
+from sqlalchemy.types import String
 from sqlalchemy.orm import joinedload, raiseload, subqueryload
 from sqlalchemy.orm.exc import NoResultFound
 
@@ -20,7 +19,7 @@ from uber.models import AdminAccount, ApiJob, ArtShowApplication, Attendee, Grou
     ReceiptInfo, ReceiptTransaction, Tracking, WorkstationAssignment, EscalationTicket
 from uber.site_sections import devtools
 from uber.utils import check, get_api_service_from_server, normalize_email, normalize_email_legacy, valid_email, \
-    TaskUtils, Order
+    TaskUtils, Order, groupify
 from uber.payments import ReceiptManager, RefundRequest
 
 
@@ -40,7 +39,7 @@ def _search(all_processor_txns, text):
 
         return receipt_txns.filter(or_(*id_list)), ''
     
-    for attr in [col for col in ReceiptTransaction().__table__.columns if isinstance(col.type, UnicodeText)]:
+    for attr in [col for col in ReceiptTransaction().__table__.columns if isinstance(col.type, String)]:
         if attr != ReceiptTransaction.desc:
             check_list.append(attr.ilike('%' + text + '%'))
 
@@ -89,9 +88,7 @@ def revert_receipt_item(session, item):
         setattr(new_model, col_name, item.revert_change[col_name])
 
     for col_name in item.revert_change:
-        receipt_items = ReceiptManager.process_receipt_change(model, col_name, receipt=receipt,
-                                                             new_model=new_model)
-        session.add_all(receipt_items)
+        ReceiptManager.process_receipt_change(model, col_name, receipt=receipt, new_model=new_model)
         model.apply(item.revert_change, restricted=False)
 
     error = check(model)
@@ -279,15 +276,14 @@ class Root:
 
         other_receipts = set()
         if isinstance(model, Attendee):
-            for app in model.art_show_applications:
-                other_receipt = session.get_receipt_by_model(app, options=options)
-                if other_receipt:
-                    other_receipt.changes = session.query(Tracking).filter(
-                        or_(Tracking.links.like('%model_receipt({})%'
-                                                .format(other_receipt.id)),
-                            and_(Tracking.model == 'ModelReceipt',
-                            Tracking.fk_id == other_receipt.id))).order_by(Tracking.when).all()
-                    other_receipts.add(other_receipt)
+            other_receipt = session.get_receipt_by_model(model.art_show_application, options=options)
+            if other_receipt:
+                other_receipt.changes = session.query(Tracking).filter(
+                    or_(Tracking.links.like('%model_receipt({})%'
+                                            .format(other_receipt.id)),
+                        and_(Tracking.model == 'ModelReceipt',
+                        Tracking.fk_id == other_receipt.id))).order_by(Tracking.when).all()
+                other_receipts.add(other_receipt)
 
         closed_receipts = set()
         closed_receipt_query = session.query(ModelReceipt).filter(ModelReceipt.owner_id == id,
@@ -300,11 +296,6 @@ class Root:
                     and_(Tracking.model == 'ModelReceipt',
                     Tracking.fk_id == closed_receipt.id))).order_by(Tracking.when).all()
             closed_receipts.add(closed_receipt)
-
-        other_purchased_badges = []
-        for purchaser_receipt in session.query(ModelReceipt).join(ReceiptItem).filter(ReceiptItem.purchaser_id == model.id):
-            if purchaser_receipt.owner_id != model.id:
-                other_purchased_badges.append(session.get_model_by_receipt(purchaser_receipt))
 
         return {
             'attendee': model if isinstance(model, Attendee) else None,
@@ -322,7 +313,6 @@ class Root:
                 c.SQUARE: "SPIn" if c.SPIN_TERMINAL_AUTH_KEY else "Square",
                 c.MANUAL: "Stripe"},
             'refund_txn_candidates': refund_txn_candidates,
-            'other_purchased_badges': other_purchased_badges,
         }
     
     def receipt_items_guide(self, session, message=''):
@@ -334,6 +324,7 @@ class Root:
                 c.MANUAL: "Stripe"}
         }
 
+    @not_site_mappable
     def create_receipt(self, session, id='', blank=False):
         try:
             model = session.attendee(id)
@@ -465,7 +456,7 @@ class Root:
         if item.receipt_txn and item.receipt_txn.amount_left:
             refund_amount = min(item.amount * item.count, item.receipt_txn.amount_left)
             try:
-                refund = RefundRequest(item.receipt_txn, amount=refund_amount,
+                refund = RefundRequest(session, item.receipt_txn, amount=refund_amount,
                                        method=item.receipt_txn.method, who=AdminAccount.admin_name())
             except ValueError as e:
                 return {'error': e}
@@ -548,7 +539,7 @@ class Root:
                 refund_amount -= processing_fees
 
             try:
-                refund = RefundRequest(item.receipt_txn, amount=refund_amount,
+                refund = RefundRequest(session, item.receipt_txn, amount=refund_amount,
                                        method=item.receipt_txn.method, who=AdminAccount.admin_name())
             except ValueError as e:
                 return {'error': e}
@@ -636,7 +627,7 @@ class Root:
             error = txn.check_stripe_id()
             if error:
                 return {'error': "Error while checking this transaction: " + error}
-            charge_id = txn.check_paid_from_stripe()
+            charge_id = txn.check_paid_from_stripe(session)
             if charge_id:
                 return {'error': "Stripe indicates that this payment has already completed."}
 
@@ -662,7 +653,7 @@ class Root:
         error = txn.check_stripe_id()
         if not error:
             if txn.intent_id and not txn.charge_id:
-                charge_id = txn.check_paid_from_stripe()
+                charge_id = txn.check_paid_from_stripe(session)
                 if charge_id:
                     messages.append("Transaction marked as paid from Stripe.")
 
@@ -724,7 +715,7 @@ class Root:
 
         error = ''
         try:
-            refund = RefundRequest(txn, amount=refund_amount,
+            refund = RefundRequest(session, txn, amount=refund_amount,
                                    method=txn.method, who=AdminAccount.admin_name())
         except ValueError as e:
             error = e
@@ -798,7 +789,7 @@ class Root:
             session.add(ReceiptItem(
                 receipt_id=txn.receipt.id,
                 department=c.REG_RECEIPT_ITEM,
-                category=c.REFUND,
+                category=c.CANCEL_ITEM,
                 desc=f"Refunding {model.full_name}'s Promo Code",
                 amount=-group_refund_amount,
                 who=AdminAccount.admin_name() or 'non-admin',
@@ -822,7 +813,7 @@ class Root:
 
             error = ''
             try:
-                refund = RefundRequest(txn, amount=group_refund_amount, who=AdminAccount.admin_name())
+                refund = RefundRequest(session, txn, amount=group_refund_amount, who=AdminAccount.admin_name())
             except ValueError as e:
                 error = e
 
@@ -882,11 +873,11 @@ class Root:
             raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}',
                                model.id, f"This registration/application already has an existing active receipt.")
         
-        from_model = session.query(model.__class__).filter_by(id=from_id).first()
+        from_model = session.get(model.__class__, from_id)
         if from_model:
             receipt = from_model.active_receipt
         else:
-            receipt = session.query(ModelReceipt).filter(ModelReceipt.id == from_id).first()
+            receipt = session.get(ModelReceipt, from_id)
 
         if not receipt:
             raise HTTPRedirect('../reg_admin/receipt_items?id={}&message={}',
@@ -939,7 +930,7 @@ class Root:
                 receipt_managers[attendee] = receipt_manager
 
         for charge_id, (refund_amount, txns) in all_refunds.items():
-            refund = RefundRequest(txns, refund_amount, skip_errors=True, who=AdminAccount.admin_name())
+            refund = RefundRequest(session, txns, refund_amount, skip_errors=True, who=AdminAccount.admin_name())
 
             error = refund.process_refund()
             if error:
@@ -1016,8 +1007,7 @@ class Root:
             attendee.paid = c.NOT_PAID
         attendee.overridden_price = None
         if receipt:
-            receipt_items = ReceiptManager.auto_update_receipt(attendee, receipt, {'promo_code_code': ''})
-            session.add_all(receipt_items)
+            ReceiptManager.auto_update_receipt(session, attendee, receipt, {'promo_code_code': ''})
 
         attendee.promo_code = None
         attendee.badge_status = c.NEW_STATUS
@@ -1399,10 +1389,17 @@ class Root:
                         raise HTTPRedirect('attendee_account_form?id={}&message={}', account.id,
                                            "Account email updated!")
 
+        other_purchased_badges = []
+        attendee_ids = [a.id for a in account.valid_attendees]
+        for purchaser_receipt in session.query(ModelReceipt).join(ReceiptItem).filter(ReceiptItem.purchaser_id == account.id):
+            if purchaser_receipt.owner_id not in attendee_ids:
+                other_purchased_badges.append(session.get_model_by_receipt(purchaser_receipt))
+
         return {
             'message': message,
             'account': account,
             'new_email': new_email,
+            'other_purchased_badges': other_purchased_badges,
         }
 
     @site_mappable
@@ -1471,7 +1468,7 @@ class Root:
                 attendees = list(chain(*attendees_by_name_email.values()))
 
             if models and which_import == 'accounts':
-                admin_id = cherrypy.session.get('account_id')
+                admin_id = cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None))
                 admin_name = session.admin_attendee().full_name
                 import_attendee_accounts.delay(models, admin_id, admin_name, target_server, api_token)
                 message = f"{len(models)} attendee accounts queued for import. Existing accounts and pending imports will be skipped."
@@ -1513,7 +1510,7 @@ class Root:
                                api_token,
                                query)
 
-        admin_id = cherrypy.session.get('account_id')
+        admin_id = cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None))
         admin_name = session.admin_attendee().full_name
         already_queued = 0
         attendee_ids = attendee_ids if isinstance(attendee_ids, list) else [attendee_ids]
@@ -1571,7 +1568,7 @@ class Root:
                                query,
                                'groups')
 
-        admin_id = cherrypy.session.get('account_id')
+        admin_id = cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None))
         admin_name = session.admin_attendee().full_name
         already_queued = 0
         group_ids = group_ids if isinstance(group_ids, list) else [group_ids]

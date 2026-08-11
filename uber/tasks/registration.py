@@ -1,26 +1,27 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
 from itertools import chain
-from pockets import groupify
 
 import stripe
 import time
+import logging
 import pytz
 from celery.schedules import crontab
-from pockets.autolog import log
 from sqlalchemy import not_, or_, insert
 from sqlalchemy.orm import joinedload, raiseload, subqueryload
 from sqlalchemy.orm.exc import NoResultFound
 
+from uber.email import EmailService
 from uber.config import c
 from uber.custom_tags import readable_join
 from uber.decorators import render
 from uber.models import (ApiJob, Attendee, AttendeeAccount, BadgeInfo, BadgePickupGroup, Email, Group, ModelReceipt,
                          ReceiptInfo, ReceiptItem, ReceiptTransaction, Session, TerminalSettlement)
-from uber.tasks.email import send_email
 from uber.tasks import celery
-from uber.utils import localized_now, TaskUtils, normalize_email
+from uber.utils import localized_now, TaskUtils, normalize_email, groupify
 from uber.payments import ReceiptManager, TransactionRequest
+
+log = logging.getLogger(__name__)
 
 
 if c.AUTHORIZENET_LOGIN_ID:
@@ -70,14 +71,13 @@ def create_badge_nums():
 
 
 @celery.task
-def update_receipt(attendee_id, params):
-    with Session() as session:
-        attendee = session.attendee(attendee_id)
-        receipt = session.get_receipt_by_model(attendee)
-        if receipt:
-            receipt_items = ReceiptManager.auto_update_receipt(attendee, receipt, params)
-            session.add_all(receipt_items)
-            session.commit()
+def update_receipt(attendee_id, params, session=None):
+    session = session or Session()
+    attendee = session.attendee(attendee_id)
+    receipt = session.get_receipt_by_model(attendee)
+    if receipt:
+        ReceiptManager.auto_update_receipt(session, attendee, receipt, params)
+        session.commit()
 
 
 @celery.schedule(crontab(minute=0, hour='*/6'))
@@ -111,19 +111,14 @@ def check_duplicate_registrations():
                         del dupes[who]
 
                 if dupes and session.no_email(subject):
-                    body = render('emails/daily_checks/duplicates.html',
-                                  {'dupes': sorted(dupes.items())}, encoding=None)
-                    send_email.delay(c.REPORTS_EMAIL, c.REGDESK_EMAIL, subject, body, format='html', model='n/a')
+                    EmailService.queue_email(session, 'daily_duplicates_report', to=c.REGDESK_EMAIL,
+                                             subject=subject, data={'dupes': sorted(dupes.items())})
 
 
 @celery.schedule(crontab(minute=0, hour='*/6'))
 def check_placeholder_registrations():
-    if c.PRE_CON and c.CHECK_PLACEHOLDERS and (c.DEV_BOX or c.SEND_EMAILS) and c.REPORTS_EMAIL:
+    if c.PRE_CON and (c.DEV_BOX or c.SEND_EMAILS) and c.REPORTS_EMAIL:
         emails = [[
-            'Staff',
-            c.STAFF_EMAIL,
-            (Attendee.staffing == True, Attendee.is_valid == True)  # noqa: E712
-        ], [
             'Panelist',
             c.PANELS_EMAIL,
             (or_(Attendee.badge_type == c.GUEST_BADGE, Attendee.ribbon.contains(c.PANELIST_RIBBON)),
@@ -137,6 +132,24 @@ def check_placeholder_registrations():
                 Attendee.ribbon.contains(c.PANELIST_RIBBON))),
             Attendee.is_valid == True)  # noqa: E712
         ]]
+
+        if c.STAFF_EMAIL == c.VOLUNTEER_EMAIL:
+            emails.append([
+                'Staff/Volunteers',
+                c.STAFF_EMAIL,
+                (Attendee.staffing == True, Attendee.is_valid == True)  # noqa: E712
+            ])
+        else:
+            emails.append([
+                'Staff',
+                c.STAFF_EMAIL,
+                (Attendee.badge_type.in_([c.STAFF_BADGE, c.CONTRACTOR_BADGE]), Attendee.is_valid == True)  # noqa: E712
+            ])
+            emails.append([
+                'Volunteers',
+                c.VOLUNTEER_EMAIL,
+                (Attendee.ribbon.contains(c.VOLUNTEER_RIBBON), Attendee.is_valid == True)  # noqa: E712
+            ])
 
         with Session() as session:
             for badge_type, to, per_email_filter in emails:
@@ -153,9 +166,9 @@ def check_placeholder_registrations():
                                            .options(joinedload(Attendee.group))
                                            .order_by(Attendee.registered, Attendee.full_name).all())
                     if placeholders:
-                        body = render('emails/daily_checks/placeholders.html',
-                                      {'placeholders': placeholders}, encoding=None)
-                        send_email.delay(c.REPORTS_EMAIL, to, subject, body, format='html', model='n/a')
+                        EmailService.queue_email(session, 'daily_placeholder_report', to=to,
+                                                 subject=subject, data={'placeholders': placeholders},
+                                                 replace_unsent=True)
 
 
 @celery.schedule(crontab(minute=0, hour='*/6'))
@@ -164,12 +177,10 @@ def check_pending_badges():
         subject = c.EVENT_NAME + ' Pending Badges Report for ' + localized_now().strftime('%Y-%m-%d')
         with Session() as session:
             pending = session.query(Attendee).filter(Attendee.badge_status == c.PENDING_STATUS,
-                                                        Attendee.paid != c.PENDING).all()
+                                                     Attendee.paid != c.PENDING).all()
             if pending and session.no_email(subject):
-                body = render('emails/daily_checks/pending.html',
-                                {'pending': pending}, encoding=None)
-                send_email.delay(c.REPORTS_EMAIL, c.STAFF_EMAIL, subject, body,
-                                    format='html', model='n/a')
+                EmailService.queue_email(session, 'daily_pending_report', to=c.REPORTS_CC_EMAIL,
+                                         subject=subject, data={'pending': pending})
 
 
 @celery.schedule(crontab(minute=0, hour='*/6'))
@@ -184,8 +195,7 @@ def check_unassigned_volunteers():
                 not_(Attendee.dept_memberships.any())).order_by(Attendee.full_name).all()  # noqa: E712
             subject = c.EVENT_NAME + ' Unassigned Volunteer Report for ' + localized_now().strftime('%Y-%m-%d')
             if unassigned and session.no_email(subject):
-                body = render('emails/daily_checks/unassigned.html', {'unassigned': unassigned}, encoding=None)
-                send_email.delay(c.REPORTS_EMAIL, c.STAFF_EMAIL, subject, body, format='html', model='n/a')
+                EmailService.queue_email(session, 'daily_unassigned_report', to=c.VOLUNTEER_EMAIL)
 
 
 @celery.schedule(timedelta(minutes=5))
@@ -196,8 +206,8 @@ def check_near_cap():
             subject = "BADGES SOLD ALERT: {} BADGES LEFT!".format(badges_left)
             with Session() as session:
                 if not session.query(Email).filter_by(subject=subject).first() and actual_badges_left <= badges_left:
-                    body = render('emails/badges_sold_alert.txt', {'badges_left': actual_badges_left}, encoding=None)
-                    send_email.delay(c.REPORTS_EMAIL, [c.REGDESK_EMAIL, c.ADMIN_EMAIL], subject, body, model='n/a')
+                    EmailService.queue_email(session, 'badges_sold_alert', to=[c.REGDESK_EMAIL, c.ADMIN_EMAIL],
+                                             subject=subject, data={'badges_left': actual_badges_left})
 
 
 @celery.schedule(timedelta(days=1))
@@ -269,18 +279,9 @@ def email_pending_attendees():
                         already_emailed_accounts.append(email_to)
                     continue
 
-                body = render('emails/reg_workflow/pending_badges.html',
-                              {'account': badge.managers[0] if badge.managers else None,
-                               'attendee': badge, 'compare_date': compare_date}, encoding=None)
-                send_email.delay(
-                    c.REGDESK_EMAIL,
-                    email_to,
-                    f"You have an incomplete {c.EVENT_NAME} registration!",
-                    body,
-                    format='html',
-                    model=badge.managers[0].to_dict() if c.ATTENDEE_ACCOUNTS_ENABLED else badge.to_dict(),
-                    ident=email_ident
-                )
+                EmailService.queue_email(session, 'incomplete_reg_notification', badge,
+                                         data={'account': badge.managers[0] if badge.managers else None, 'compare_date': compare_date},
+                                         limit_one=True)
 
                 if c.ATTENDEE_ACCOUNTS_ENABLED:
                     already_emailed_accounts.append(email_to)
@@ -289,7 +290,7 @@ def email_pending_attendees():
 @celery.task
 def send_receipt_email(receipt_id):
     with Session() as session:
-        receipt = session.query(ReceiptInfo).filter_by(id=receipt_id).first()
+        receipt = session.get(ReceiptInfo, receipt_id)
         if not receipt:
             log.error(f"Could not send receipt {receipt_id} to model {receipt.fk_email_model} {receipt.fk_email_id}: "
                       "receipt info not found!")
@@ -301,17 +302,15 @@ def send_receipt_email(receipt_id):
             return
 
         model = Session.resolve_model(receipt.fk_email_model)
-        email_to = session.query(model).filter_by(id=receipt.fk_email_id).first()
+        email_to = session.get(model, receipt.fk_email_id)
         if not email_to:
             log.error(f"Could not send receipt {receipt_id} to model {receipt.fk_email_model} "
                       f"{receipt.fk_email_id}: model not found!")
             return
 
         to = getattr(email_to, 'email', getattr(email_to, 'email_address', ''))
-        subject = f"Your {c.EVENT_NAME_AND_YEAR} receipt [#{receipt.reference_id}]"
 
-        body = render('emails/reg_workflow/receipt.html', {'receipt': receipt}, encoding=None)
-        send_email.delay(c.ADMIN_EMAIL, to, subject, body, format='html', model='n/a')
+        EmailService.queue_email(session, 'receipt_info', to=to, data={'receiptinfo': receipt})
 
 
 @celery.task
@@ -331,7 +330,7 @@ def close_out_terminals(workstation_and_terminal_ids, who):
             session.add(settlement)
             session.commit()
 
-            settle_request = SpinTerminalRequest(terminal_id)
+            settle_request = SpinTerminalRequest(session, terminal_id)
             settle_response = settle_request.close_out_terminal()
             if settle_response:
                 settle_response_json = settle_response.json()
@@ -441,7 +440,7 @@ def process_terminal_sale(workstation_num, terminal_id, model_id=None, pickup_gr
                         session.commit()
                         return
             receipt = session.get_receipt_by_model(model, create_if_none="DEFAULT")
-            payment_request = SpinTerminalRequest(terminal_id=terminal_id,
+            payment_request = SpinTerminalRequest(session, terminal_id=terminal_id,
                                                   receipt=receipt,
                                                   tracker=txn_tracker,
                                                   **kwargs)
@@ -476,16 +475,16 @@ def check_missed_stripe_payments():
         for payment in pending_payments:
             pending_ids.append(payment.intent_id)
 
-    events = stripe.Event.list(type='payment_intent.succeeded', created={
-        # Check for events created in the last hour.
-        'gte': int(time.time() - 60 * 60),
-    })
+        events = stripe.Event.list(type='payment_intent.succeeded', created={
+            # Check for events created in the last hour.
+            'gte': int(time.time() - 60 * 60),
+        })
 
-    for event in events.auto_paging_iter():
-        payment_intent = event.data.object
-        if payment_intent.id in pending_ids:
-            paid_ids.append(payment_intent.id)
-            ReceiptManager.mark_paid_from_stripe_intent(payment_intent)
+        for event in events.auto_paging_iter():
+            payment_intent = event.data.object
+            if payment_intent.id in pending_ids:
+                paid_ids.append(payment_intent.id)
+                ReceiptManager.mark_paid_from_stripe_intent(session, payment_intent)
     return paid_ids
 
 
@@ -531,19 +530,16 @@ def check_authnet_held_txns():
         release_txns_by_charge_id = groupify(release_txns, 'charge_id')
 
         for charge_id, txns in release_txns_by_charge_id.items():
-            txn_status = TransactionRequest()
+            txn_status = TransactionRequest(session)
             error = txn_status.get_authorizenet_txn(charge_id)
 
             if error:
                 log.error(f"Tried to check status of transaction {charge_id} but got the error: {error}")
             else:
                 if txn_status.response.transactionStatus in ["declined", "expired", "failedReview", "voided"]:
-                    body = render('emails/held_txn_declined.html',
-                                  {'txns': txns, 'status': str(txn_status.response.transactionStatus)},
-                                  encoding=None)
                     subject = f"AuthNet Held Transaction Declined: {charge_id}"
-                    send_email.delay(c.REPORTS_EMAIL, c.REGDESK_EMAIL, subject, body,
-                                     format='html', model='n/a')
+                    EmailService.queue_email(session, 'authnet_held_txn_admin', to=c.REGDESK_EMAIL,
+                                             subject=subject, data={'txns': txns, 'status': str(txn_status.response.transactionStatus)})
                     
                     for txn in txns:
                         txn.cancelled = datetime.now()
@@ -563,39 +559,6 @@ def create_badge_pickup_groups():
                 pickup_group.build_from_account(account)
                 session.add(pickup_group)
             session.commit()
-
-
-@celery.schedule(timedelta(days=14))
-def reassign_purchaser_ids():
-    with Session() as session:
-        purchaser_ids = session.query(
-            ReceiptItem.purchaser_id).filter(ReceiptItem.purchaser_id != None).join(
-                ModelReceipt).join(Attendee, ModelReceipt.owner_id == Attendee.id
-                                   ).filter(Attendee.is_valid == True).group_by(ReceiptItem.purchaser_id).all()
-        group_purchaser_ids = session.query(
-            ReceiptItem.purchaser_id).filter(ReceiptItem.purchaser_id != None).join(
-                ModelReceipt).join(Group, ModelReceipt.owner_id == Group.id
-                                   ).filter(Group.is_valid == True).group_by(ReceiptItem.purchaser_id).all()
-        purchaser_id_list = [r for r, in purchaser_ids] + [r for r, in group_purchaser_ids]
-        invalid_attendees = session.query(Attendee).filter(Attendee.is_valid == False, Attendee.id.in_(purchaser_id_list))
-
-        for attendee in invalid_attendees:
-            alt_id = None
-            valid_dupe = session.query(Attendee).filter(Attendee.is_valid == True,
-                                                        Attendee.first_name == attendee.first_name,
-                                                        Attendee.last_name == Attendee.last_name,
-                                                        Attendee.email == attendee.email).first()
-            if valid_dupe:
-                alt_id = valid_dupe.id
-            elif not c.ATTENDEE_ACCOUNTS_ENABLED and attendee.badge_pickup_group:
-                alt_id = attendee.badge_pickup_group.fallback_purchaser_id
-
-            if alt_id:
-                receipt_items = session.query(ReceiptItem).filter(ReceiptItem.purchaser_id == attendee.id).join(
-                    ModelReceipt).join(Attendee, ModelReceipt.owner_id == Attendee.id).filter(Attendee.is_valid == True)
-                for item in receipt_items:
-                    item.purchaser_id = alt_id
-                    session.add(item)
 
 
 @celery.schedule(timedelta(days=60))

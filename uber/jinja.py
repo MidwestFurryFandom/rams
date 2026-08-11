@@ -171,9 +171,9 @@ class JinjaEnv:
         cls.clear_cache()
 
     @classmethod
-    def env(cls):
+    def env(cls, **kwargs):
         if cls._env is None:
-            cls._env = cls._init_env()
+            cls._env = cls._init_env(**kwargs)
         return cls._env
 
     @classmethod
@@ -182,13 +182,21 @@ class JinjaEnv:
             cls._env._get_matching_filenames.cache_clear()
 
     @classmethod
-    def _init_env(cls):
+    def _init_env(cls, **kwargs):
+        params = {
+            'loader': AbsolutePathLoader(cls._template_dirs),
+            'autoescape': True,
+            # In production, disable automatic template mtime disk checks to save CPU cycles and file stat overhead.
+            'auto_reload': bool(getattr(c, 'DEV_BOX', False)),
+            'lstrip_blocks': True,
+            'trim_blocks': True,
+            'keep_trailing_newline': True,
+        }
+        params.update(kwargs)
+
         env = MultiPathEnvironment(
             base_template_paths=cls._base_template_paths,
-            autoescape=True,
-            loader=AbsolutePathLoader(cls._template_dirs),
-            lstrip_blocks=True,
-            trim_blocks=True,
+            **params
         )
 
         for name, func in cls._exportable_functions.items():

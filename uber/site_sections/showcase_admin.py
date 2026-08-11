@@ -1,15 +1,15 @@
 import cherrypy
-from pockets import listify
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import joinedload
 
+from uber.email import EmailService
 from uber.config import c
 from uber.decorators import ajax, all_renderable, csrf_protected, render, site_mappable
 from uber.errors import HTTPRedirect
+from uber.files import FileService
 from uber.forms import load_forms
-from uber.models import AdminAccount, Attendee, IndieJudge, IndieGameReview, IndieStudio, IndieGame
-from uber.tasks.email import send_email
-from uber.utils import check, get_api_service_from_server, normalize_email_legacy, validate_model
+from uber.models import AdminAccount, Attendee, Email, IndieJudge, IndieGameReview, IndieStudio, IndieGame, PageViewTracking, Tracking
+from uber.utils import check, get_api_service_from_server, normalize_email_legacy, validate_model, listify
 
 
 def _process_showcase_type(showcase_type, message=''):
@@ -52,8 +52,8 @@ class Root:
             'showcase_label': 'All' if showcase_type == 'all' else c.SHOWCASE_GAME_TYPES[showcase_type],
         }
     
-    def update_studio(self, session, message='', **params):
-        studio = session.indie_studio(params.get('id'))
+    def studio(self, session, id, message='', **params):
+        studio = session.get(IndieStudio, id)
 
         forms = load_forms(params, studio, ['AdminStudioInfo'])
 
@@ -66,6 +66,37 @@ class Root:
                                 params.get('showcase_type', 'all'), message)
             raise HTTPRedirect('studios?message={}', message)
 
+        return {
+            'message': message,
+            'studio': studio,
+            'forms': forms,
+        }
+    
+    def studio_history(self, session, id, message='', **params):
+        studio = session.get(IndieStudio, id)
+
+        return {
+            'studio': studio,
+            'changes': session.query(Tracking).filter(or_(
+                Tracking.links.like('%indie_studio({})%'.format(id)),
+                and_(Tracking.model == 'IndieStudio', Tracking.fk_id == id))).order_by(Tracking.when).all(),
+        }
+    
+    def studio_emails(self, session, id, message='', **params):
+        studio = session.get(IndieStudio, id)
+
+        return {
+            'message': message,
+            'studio': studio,
+            'depts_by_sender': EmailService.emails_from_depts(session),
+            'studio_emails': session.query(Email).filter(Email.model == 'IndieStudio',
+                                                         Email.fk_id == id).order_by(Email.generated).all(),
+            'game_emails': session.query(Email).filter(Email.model == 'IndieGame',
+                                                       Email.fk_id.in_([game.id for game in studio.games])).order_by(Email.generated).all(),
+            'dev_emails': session.query(Email).filter(Email.model == 'IndieDeveloper',
+                                                      Email.fk_id.in_([dev.id for dev in studio.developers])).order_by(Email.generated).all(),
+        }
+
     @ajax
     def validate_studio(self, session, form_list=[], **params):
         studio = session.indie_studio(params.get('id'))
@@ -76,7 +107,7 @@ class Root:
             form_list = [form_list]
 
         forms = load_forms(params, studio, form_list)
-        all_errors = validate_model(forms, studio, is_admin=True)
+        all_errors = validate_model(session, forms, studio, is_admin=True)
 
         if all_errors:
             return {"error": all_errors}
@@ -85,14 +116,15 @@ class Root:
 
     def studios(self, session, message=''):
         studios = session.query(IndieStudio).outerjoin(IndieStudio.games)
-        studio_forms = {}
+        primary_contact_emails = []
         for studio in studios:
-            studio_forms[studio.id] = load_forms({}, studio, ['AdminStudioInfo'])
+            for contact in studio.primary_contacts:
+                primary_contact_emails.append(contact.email_to_address)
 
         return {
             'message': message,
             'studios': studios,
-            'studio_forms': studio_forms,
+            'primary_contact_emails': primary_contact_emails,
         }
 
     def create_judge(self, session, message='', first_name='', last_name='', email='', showcase_type='all', **params):
@@ -134,17 +166,8 @@ class Root:
                     session.add(attendee)
 
                 attendee.admin_account, password = session.create_admin_account(attendee, judge=judge)
-                email_body = render('emails/accounts/new_account.txt', {
-                    'password': password,
-                    'account': attendee.admin_account,
-                    'creator': AdminAccount.admin_name()
-                }, encoding=None)
-                send_email.delay(
-                    c.MIVS_EMAIL,
-                    attendee.email_to_address,
-                    f'New {c.EVENT_NAME} Indies Judge Account',
-                    email_body,
-                    model=attendee.to_dict('id'))
+                EmailService.queue_email(session, 'new_judge_admin_account', attendee.admin_account,
+                                         data={'password': password, 'creator': AdminAccount.admin_name()})
             raise HTTPRedirect(
                 index_link, f'{attendee.full_name} has been given an admin account as an Indies Judge.')
 
@@ -154,8 +177,8 @@ class Root:
             'forms': forms,
         }
 
-    def edit_judge(self, session, message='', showcase_type='all', **params):
-        judge = session.indie_judge(params.get('id'))
+    def edit_judge(self, session, id, message='', showcase_type='all', **params):
+        judge = session.indie_judge(id)
         message, showcase_type = _process_showcase_type(showcase_type, message)
 
         forms = load_forms(params, judge, ['JudgeShowcaseInfo', 'MivsJudgeInfo'])
@@ -188,6 +211,12 @@ class Root:
             'matching': matching,
             'nonmatching': nonmatching,
             'matching_genre': matching_genre,
+            'changes': session.query(Tracking).filter(or_(
+                Tracking.links.like('%indie_judge({})%'.format(id)),
+                and_(Tracking.model == 'IndieJudge', Tracking.fk_id == id))).order_by(Tracking.when).all(),
+            'emails': session.query(Email).filter(Email.model == 'IndieJudge',
+                                                  Email.fk_id == judge.id).order_by(Email.generated).all(),
+            'depts_by_sender': EmailService.emails_from_depts(session),
         }
     
     @ajax
@@ -203,7 +232,7 @@ class Root:
             form_list = [form_list]
 
         forms = load_forms(params, judge, form_list)
-        all_errors = validate_model(forms, judge, is_admin=True)
+        all_errors = validate_model(session, forms, judge, is_admin=True)
 
         if all_errors:
             return {"error": all_errors}
@@ -223,16 +252,8 @@ class Root:
 
         session.commit()
 
-        email_body = render('emails/mivs/judge_disqualified.txt', {
-                    'judge': judge,
-                    'prior_payment_status': prior_payment_status,
-                }, encoding=None)
-        send_email.delay(
-            c.MIVS_EMAIL,
-            judge.attendee.email_to_address,
-            'MIVS Judging Disqualification',
-            email_body,
-            model=attendee.to_dict('id'))
+        EmailService.queue_email(session, 'indies_judge_disqualified', judge,
+                                 data={'prior_payment_status': prior_payment_status})
 
         raise HTTPRedirect('index?message={}{}', attendee.full_name,
                            ' has been disqualified from judging for this year')
@@ -285,11 +306,18 @@ class Root:
         return {
             'game': game,
             'studio': game.studio,
+            'images': FileService.get_existing_files(session, game, uselist=True),
             'message': message,
             'forms': forms,
             'matching': matching,
             'matching_genre': matching_genre,
             'nonmatching': nonmatching,
+            'changes': session.query(Tracking).filter(or_(
+                Tracking.links.like('%indie_game({})%'.format(id)),
+                and_(Tracking.model == 'IndieGame', Tracking.fk_id == id))).order_by(Tracking.when).all(),
+            'emails': session.query(Email).filter(Email.model == 'IndieGame',
+                                                  Email.fk_id == game.id).order_by(Email.generated).all(),
+            'depts_by_sender': EmailService.emails_from_depts(session),
         }
     
     @ajax
@@ -312,7 +340,7 @@ class Root:
             form_list = [form_list]
 
         forms = load_forms(params, game, form_list)
-        all_errors = validate_model(forms, game, is_admin=True)
+        all_errors = validate_model(session, forms, game, is_admin=True)
 
         if all_errors:
             return {"error": all_errors}
@@ -388,23 +416,19 @@ class Root:
             if review.has_video_issues:
                 review.video_status = c.PENDING
                 if not no_emails:
-                    body = render('emails/mivs/video_fixed.txt', {'review': review}, encoding=None)
-                    send_email.delay(
-                        game.admin_email,
-                        review.judge.email_to_address,
-                        f'{game.showcase_type_label}: Video Problems Resolved for {game.title}',
-                        body,
-                        model=review.judge.to_dict('id'))
+                    email_data = {'review': review, 'game': review.game, 'judge_name': review.judge.attendee.first_name}
+                    EmailService.queue_email(session, 'indies_video_problems_fixed', review.judge, sender=game.admin_email,
+                                             subject=f'{game.showcase_type_label}: Video Problems Resolved for {game.title}',
+                                             data=email_data)
             if review.has_game_issues:
+                old_status_label = review.game_status_label
                 review.game_status = c.PENDING
                 if not no_emails:
-                    body = render('emails/mivs/game_fixed.txt', {'review': review}, encoding=None)
-                    send_email.delay(
-                        game.admin_email,
-                        review.judge.email_to_address,
-                        f'{game.showcase_type_label}: Game Problems Resolved for {game.title}',
-                        body,
-                        model=review.judge.to_dict('id'))
+                    email_data = {'review': review, 'game': review.game, 'judge_name': review.judge.attendee.first_name,
+                                  'review_status_label': old_status_label}
+                    EmailService.queue_email(session, 'indies_game_problems_fixed', review.judge, sender=game.admin_email,
+                                             subject=f'{game.showcase_type_label}: Game Problems Resolved for {game.title}',
+                                             data=email_data)
         raise HTTPRedirect(
             'edit_game?id={}&message={}{}{}', game.id, game.title,
             ' has been marked as having its judging issues fixed',
@@ -504,17 +528,8 @@ class Root:
             else:
                 attendee.admin_account, password = session.create_admin_account(attendee, judge=new_judge)
                 new_judge.admin_id = attendee.admin_account.id
-                email_body = render('emails/accounts/new_account.txt', {
-                        'password': password,
-                        'account': attendee.admin_account,
-                        'creator': AdminAccount.admin_name()
-                    }, encoding=None)
-                send_email.delay(
-                    c.MIVS_EMAIL,
-                    attendee.email,
-                    'New {} MIVS Judge Account'.format(c.EVENT_NAME),
-                    email_body,
-                    model=attendee.to_dict('id'))
+                EmailService.queue_email(session, 'new_judge_admin_account', attendee.admin_account,
+                                         data={'password': password, 'creator': AdminAccount.admin_name()})
 
             session.add(new_judge)
             session.add(attendee)

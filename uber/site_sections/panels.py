@@ -1,15 +1,17 @@
+import logging
 import cherrypy
 
 from datetime import datetime
 from sqlalchemy.orm.exc import NoResultFound
-from pockets.autolog import log
 
 from uber.config import c
-from uber.decorators import all_renderable, ajax
+from uber.decorators import all_renderable, ajax, requires_account
 from uber.errors import HTTPRedirect
 from uber.forms import load_forms
-from uber.models import PanelApplicant, PanelApplication
+from uber.models import Attendee, PanelApplicant, PanelApplication
 from uber.utils import add_opt, check, localized_now, validate_model
+
+log = logging.getLogger(__name__)
 
 
 def get_other_panelists_forms(num, submitter=None, **params):
@@ -27,6 +29,7 @@ def get_other_panelists_forms(num, submitter=None, **params):
 
 @all_renderable(public=True)
 class Root:
+    @requires_account(Attendee)
     def index(self, session, message='', attendee_id=None, return_to='', **params):
         """
         Our production NGINX config caches the page at /panels/index.
@@ -37,16 +40,21 @@ class Root:
         app = PanelApplication()
         is_guest = False
         readonly_fields = {}
+        attrs = [key for key in PanelApplicant().to_dict().keys() if key not in [
+                'id', 'created', 'last_updated', 'external_id', 'last_synced', 'attendee_id', 'submitter', '_model']]
 
         if attendee_id:
             attendee = session.attendee(id=attendee_id)
             if attendee.badge_type != c.GUEST_BADGE:
                 add_opt(attendee.ribbon_ints, c.PANELIST_RIBBON)
-            is_guest = attendee.group if attendee.group.guest else None
+            is_guest = attendee.group if attendee.group and attendee.group.guest else None
             if attendee.panel_applicants:
                 panelist = sorted(attendee.panel_applicants, key=lambda p: p.submitter)[0]
-                for attr in ['first_name', 'last_name', 'email', 'cellphone']:
-                    setattr(panelist, attr, getattr(attendee, attr))
+                for attr in attrs:
+                    if params.get(attr, None):
+                        setattr(panelist, attr, params[attr])
+                    elif attr in ['first_name', 'last_name', 'email', 'cellphone'] and getattr(attendee, attr):
+                        setattr(panelist, attr, getattr(attendee, attr))
             else:
                 panelist = PanelApplicant(
                     attendee_id=attendee.id,
@@ -57,10 +65,13 @@ class Root:
                 )
         else:
             panelist = PanelApplicant()
-            for attr in ['first_name', 'last_name', 'email', 'cellphone']:
+            for attr in attrs:
                 if params.get(attr, None):
                     setattr(panelist, attr, params[attr])
-                    readonly_fields[attr] = True
+        
+        for attr in attrs:
+            if getattr(panelist, attr):
+                readonly_fields[attr] = True
 
         panelist_forms = get_other_panelists_forms(4, submitter=panelist, **params)
         form_list = ['PanelInfo', 'PanelOtherInfo']
@@ -98,6 +109,9 @@ class Root:
                 for form in panelist_forms[num].values():
                     form.populate_obj(other_panelist)
                 session.add(other_panelist)
+
+            if c.ATTENDEE_ACCOUNTS_ENABLED:
+                app.attendee_account = session.current_attendee_account()
             
             message = "Your panel application has been submitted."
 
@@ -148,12 +162,12 @@ class Root:
         num_other_panelists = int(params.get('other_panelists_select', 0))
         panelist_forms = get_other_panelists_forms(num_other_panelists, submitter=PanelApplicant(), **params)
         for index, loaded_forms in panelist_forms.items():
-            errors = validate_model(loaded_forms, PanelApplicant())
+            errors = validate_model(session, loaded_forms, PanelApplicant())
             if errors:
                 all_errors.update(errors)
 
         forms = load_forms(params, PanelApplication(), form_list)
-        panel_errors = validate_model(forms, PanelApplication())
+        panel_errors = validate_model(session, forms, PanelApplication())
         if panel_errors:
             all_errors.update(panel_errors)
 
@@ -162,7 +176,8 @@ class Root:
 
         return {"success": True}
 
-    def confirm_panel(self, session, id):
+    @requires_account(PanelApplication)
+    def confirm_panel(self, session, id, **params):
         app = session.panel_application(id)
         app.confirmed = datetime.now()
         session.add(app)

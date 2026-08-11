@@ -12,8 +12,7 @@
 #}
 
 <div x-data="{ {% block x_data %}
-gets_emails: {{ developer_info.gets_emails.data|jsonize }},
-get cellphoneRequired() { return this.gets_emails },
+receives_emails: {{ developer_info.receives_emails.data|jsonize }},
 {% endblock %} }">
 
 <div class="row g-3 mb-3">
@@ -30,16 +29,16 @@ get cellphoneRequired() { return this.gets_emails },
     {{ form_macros.input(developer_info.email) }}
   </div>
   <div class="col-sm">
-    {{ form_macros.input(developer_info.cellphone, required_if="cellphoneRequired") }}
+    {{ form_macros.input(developer_info.cellphone) }}
   </div>
 {% if 'apply' not in c.PAGE_PATH %}
 </div>
 <div class="row g-3 mb-3">
     <div class="col-sm">
-        {{ form_macros.input(developer_info.gets_emails, alpine_model="gets_emails") }}
+        {{ form_macros.input(developer_info.receives_emails, alpine_model="receives_emails", readonly=primary_contact_readonly) }}
     </div>
 {% else %}
-<input type="hidden" name="{{ developer_info.gets_emails.name }}" value="{{ developer_info.gets_emails.data }}" />
+<input type="hidden" name="{{ developer_info.receives_emails.name }}" value="{{ developer_info.receives_emails.data }}" />
 {% endif %}
 {% endblock %}
 </div>

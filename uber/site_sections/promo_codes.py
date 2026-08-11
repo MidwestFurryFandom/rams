@@ -36,9 +36,8 @@ class Root:
         text = text.strip()
         words = []
         if text:
-            with Session() as session:
-                old_words = set(s for (s,) in session.query(PromoCodeWord.normalized_word).filter(
-                    PromoCodeWord.part_of_speech == part_of_speech).all())
+            old_words = set(s for (s,) in session.query(PromoCodeWord.normalized_word).filter(
+                PromoCodeWord.part_of_speech == part_of_speech).all())
 
             for word in [s for s in shlex.split(text.replace(',', ' ')) if s]:
                 if PromoCodeWord.normalize_word(word) not in old_words:
@@ -84,11 +83,12 @@ class Root:
             codes = [session.promo_code(id) for id in code_ids]
         else:
             codes = session.query(PromoCode).filter(PromoCode.group == None).all()
-        out.writerow(['Code', 'Expiration Date', 'Discount', 'Total Uses', '# Uses'])
+        out.writerow(['Code', 'Expiration Date', 'Item(s)', 'Discount', 'Total Uses', '# Uses'])
         for code in codes:
             out.writerow([
                 code.code,
                 code.expiration_date,
+                ('/').join(code.discount_on_labels),
                 code.discount_str,
                 code.uses_allowed_str,
                 code.uses_count_str])
@@ -103,6 +103,8 @@ class Root:
             length=9,
             segment_length=3,
             code='',
+            department=c.REG_RECEIPT_ITEM,
+            discount_on=[c.BASE_BADGE],
             expiration_date=c.ESCHATON,
             discount_type=0,
             discount=10,

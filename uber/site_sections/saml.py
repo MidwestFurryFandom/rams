@@ -1,6 +1,6 @@
 import cherrypy
+import logging
 
-from pockets.autolog import log
 from sqlalchemy.orm.exc import NoResultFound
 
 # xmlsec moved their constants but onelogin hasn't updated to match yet
@@ -19,6 +19,8 @@ from uber.decorators import all_renderable, not_site_mappable
 from uber.errors import HTTPRedirect
 from uber.models import Attendee, AccessGroup
 from uber.utils import prepare_saml_request, normalize_email_legacy
+
+log = logging.getLogger(__name__)
 
 
 @all_renderable(public=True)
@@ -107,6 +109,11 @@ class Root:
                     session.add(attendee_to_update)
 
                 session.commit()
+
+                if account and not account.owner:
+                    account.set_account_owner(attendee_to_update)
+                    session.add(account)
+                    session.commit()
 
                 redirect_url = req['post_data'].get('RelayState', '')
 

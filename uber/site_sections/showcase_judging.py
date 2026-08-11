@@ -1,11 +1,12 @@
 import cherrypy
 
+from uber.email import EmailService
 from uber.config import c
 from uber.decorators import all_renderable, ajax, render, site_mappable
 from uber.errors import HTTPRedirect
+from uber.files import FileService
 from uber.forms import load_forms
 from uber.models import IndieGameReview
-from uber.tasks.email import send_email
 from uber.utils import check, validate_model
 
 
@@ -53,7 +54,7 @@ class Root:
             form_list = [form_list]
 
         forms = load_forms(params, judge, form_list)
-        all_errors = validate_model(forms, judge)
+        all_errors = validate_model(session, forms, judge)
 
         if all_errors:
             return {"error": all_errors}
@@ -62,6 +63,7 @@ class Root:
 
     def game_review(self, session, message='', **params):
         review = session.indie_game_review(params.get('id'))
+        game_logo = None
 
         form_list = ['GameReview']
         if review.game.showcase_type == c.MIVS:
@@ -70,6 +72,7 @@ class Root:
             game_form_list = ['ArcadeGameInfo', 'ArcadeConsents', 'ArcadeLogistics']
         elif review.game.showcase_type == c.INDIE_RETRO:
             game_form_list = ['RetroGameInfo', 'RetroGameDetails', 'RetroLogistics']
+            game_logo = FileService.get_existing_files(session, review.game, and_flags=['game_logo'])
         else:
             game_form_list = []
 
@@ -80,15 +83,16 @@ class Root:
             for form in forms.values():
                 form.populate_obj(review)
 
-            if review.video_status in c.MIVS_PROBLEM_STATUSES\
-                    and review.video_status != review.orig_value_of('video_status'):
-                body = render('emails/mivs/admin_video_broken.txt', {'review': review}, encoding=None)
-                send_email.delay(review.game.admin_email, review.game.admin_email, 'Indies Video Submission Marked as Broken', body)
-
-            if review.game_status in c.MIVS_PROBLEM_STATUSES\
-                    and review.game_status != review.orig_value_of('game_status'):
-                body = render('emails/mivs/admin_game_broken.txt', {'review': review}, encoding=None)
-                send_email.delay(review.game.admin_email, review.game.admin_email, 'Indies Game Submission Marked as Broken', body)
+            if review.video_status in c.MIVS_PROBLEM_STATUSES and review.video_status != review.orig_value_of('video_status'):
+                email_data = {'review': review, 'game': review.game, 'judge_name': review.judge.full_name,
+                              'review_status_label': review.video_status_label}
+                EmailService.queue_email(session, 'indies_video_problems_admin', to=review.game.admin_email,
+                                         sender=review.game.admin_email, data=email_data)
+            if review.game_status in c.MIVS_PROBLEM_STATUSES and review.game_status != review.orig_value_of('game_status'):
+                email_data = {'review': review, 'game': review.game, 'judge_name': review.judge.full_name,
+                              'review_status_label': review.game_status_label}
+                EmailService.queue_email(session, 'indies_game_problems_admin', to=review.game.admin_email,
+                                         sender=review.game.admin_email, data=email_data)
 
             raise HTTPRedirect('index?id={}&message={}{}', review.judge.id,
                                review.game.title, ' game review has been uploaded')
@@ -96,8 +100,11 @@ class Root:
         return {
             'review': review,
             'game': review.game,
+            'game_logo': game_logo,
+            'submission_images': FileService.get_existing_files(
+                session, review.game, or_flags=['mivs_screenshot', 'arcade_photo', 'retro_screenshot'], uselist=True),
             'message': message,
-            'game_code': session.code_for(review.game),
+            'game_code': review.judge.get_code_for(review.game.id),
             'forms': forms,
             'game_forms': game_forms,
         }
@@ -115,7 +122,7 @@ class Root:
             form_list = [form_list]
 
         forms = load_forms(params, review, form_list)
-        all_errors = validate_model(forms, review)
+        all_errors = validate_model(session, forms, review)
 
         if all_errors:
             return {"error": all_errors}

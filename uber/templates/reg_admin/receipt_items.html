@@ -792,6 +792,7 @@
   art_show_app, c.PAGE_PATH,
   "../art_show_admin/form?id={id}", "App Form", True,
   "../art_show_admin/history?id={id}", "History", True,
+  "../art_show_admin/emails?id={id}", "Emails", True,
   "receipt_items?id={id}", "Receipt Items", c.HAS_REG_ADMIN_ACCESS,
   "../art_show_admin/index", "Return to App List", True
   ) }}
@@ -810,15 +811,6 @@
   <p>See the <a href="receipt_items_guide" target="_blank">receipt items guide</a> for information on how to use this page.</p>
   {% if c.ATTENDEE_ACCOUNTS_ENABLED and attendee.managers %}
   <p>If you need to, you can <a href="../reg_admin/attendee_account_form?id={{ attendee.managers[0].id }}">refund and cancel multiple badges</a> on this attendee's account.</p>
-  {% endif %}
-  {% if other_purchased_badges %}
-    <p>
-      <strong>Note</strong>: This {{ model_str }} is listed as the purchaser for the following badges:
-      {% for badge in other_purchased_badges %}
-      {% if not loop.first %}, {% endif %}
-      {{ badge|form_link }}
-      {% endfor %}
-    </p>
   {% endif %}
 </div>
 
@@ -1020,6 +1012,16 @@
           {% endif %}
         </td>
       </tr>
+    {% endfor %}
+    {% for discount in receipt.receipt_discounts|rejectattr('discount_str', 'equalto', '') %}
+    <tr>
+      <td>{{ discount.added|datetime_local("%b %-d %-H:%M (%-I:%M%p)") }}</td>
+      <td>{{ discount.who }}</td>
+      <td colspan="2">Discount ({{ discount.department_label }}: {{ discount.category_label }})</td>
+      <td>{{ discount.desc }}: {{ discount.discount_str }}</td>
+      <td>{{ discount.applicable_discount|format_currency }}</td>
+      <td colspan="2">Updated {{ discount.last_updated|datetime_local("%b %-d %-H:%M (%-I:%M%p)") }}</td>
+    </tr>
     {% endfor %}
     <tr>
       <td colspan="8">

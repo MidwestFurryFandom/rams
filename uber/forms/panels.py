@@ -135,7 +135,7 @@ class PanelConsents(MagForm):
 
     def verify_waiting_label(self):
         return Markup(f"""<strong>I will not prematurely e-mail {c.EVENT_NAME} to check my panel status</strong>,
-                with the understanding that {c.EVENT_NAME} will send final determinations by the end of {c.EXPECTED_RESPONSE}.""")
+                with the understanding that {c.EVENT_NAME} will send final determinations by {c.EXPECTED_RESPONSE}.""")
     
     def coc_agreement_label(self):
         return Markup(f"""I agree to be bound by the <a href="{c.CODE_OF_CONDUCT_URL}">Code of Conduct</a>.""")
@@ -168,6 +168,7 @@ class EventInfo(MagForm):
     dynamic_choices_fields = {'event_location_id': lambda: [("", 'No Location')] + c.SCHEDULE_LOCATION_OPTS,
                               'department_id': lambda: [("", 'No Department')] + c.EVENT_DEPTS_OPTS}
 
+    panel_id = HiddenField()  # Not actually used for rendering but we need to check the field for validations
     event_location_id = SelectField(
         'Location',
         description="If no location is set, this event is not shown on or exported as part of the schedule.")

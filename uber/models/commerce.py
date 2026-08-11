@@ -1,92 +1,98 @@
 from datetime import datetime
 import stripe
+import logging
 
 from pytz import UTC
-from pockets import classproperty
-from pockets.autolog import log
-from residue import JSON, CoerceUTF8 as UnicodeText, UTCDateTime, UUID
 from sqlalchemy import func, or_
 
 from sqlalchemy.sql.functions import coalesce
-from sqlalchemy.schema import ForeignKey
-from sqlalchemy.types import Boolean, Integer
+from sqlalchemy.types import DateTime, Uuid, JSON
 from sqlalchemy.dialects.postgresql.json import JSONB
 from sqlalchemy.ext.mutable import MutableDict
-from sqlalchemy.orm import backref
+from typing import Any, ClassVar
 
 from uber.config import c
 from uber.custom_tags import format_currency
-from uber.decorators import presave_adjustment
+from uber.decorators import presave_adjustment, classproperty
 from uber.models import MagModel
 from uber.models.attendee import Attendee
-from uber.models.types import default_relationship as relationship, Choice, DefaultColumn as Column
+from uber.models.types import (DefaultColumn as Column, default_relationship as relationship, Choice, MultiChoice,
+                               DefaultField as Field, DefaultRelationship as Relationship)
 from uber.payments import ReceiptManager
+
+log = logging.getLogger(__name__)
 
 
 __all__ = [
-    'ArbitraryCharge', 'MerchDiscount', 'MerchPickup', 'ModelReceipt', 'MPointsForCash',
+    'ArbitraryCharge', 'MerchDiscount', 'MerchPickup', 'ModelReceipt', 'MPointsForCash', 'ReceiptDiscount',
     'NoShirt', 'OldMPointExchange', 'ReceiptInfo', 'ReceiptItem', 'ReceiptTransaction', 'Sale', 'TerminalSettlement']
 
 
-class ArbitraryCharge(MagModel):
-    amount = Column(Integer)
-    what = Column(UnicodeText)
-    when = Column(UTCDateTime, default=lambda: datetime.now(UTC))
-    reg_station = Column(Integer, nullable=True)
+class ArbitraryCharge(MagModel, table=True):
+    amount: int = 0
+    what: str = ''
+    when: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
+    reg_station: int | None = Field(default=0, nullable=True)
 
-    _repr_attr_names = ['what']
+    _repr_attr_names: ClassVar = ['what']
 
 
-class MerchDiscount(MagModel):
+class MerchDiscount(MagModel, table=True):
     """Staffers can apply a single-use discount to any merch purchases."""
-    attendee_id = Column(UUID, ForeignKey('attendee.id'), unique=True)
-    uses = Column(Integer)
+    attendee_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='attendee.id', ondelete='CASCADE', unique=True)
+    uses: int = 0
 
 
-class MerchPickup(MagModel):
-    picked_up_by_id = Column(UUID, ForeignKey('attendee.id'))
-    picked_up_for_id = Column(UUID, ForeignKey('attendee.id'), unique=True)
-    picked_up_by = relationship(
+class MerchPickup(MagModel, table=True):
+    picked_up_by_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='attendee.id', nullable=True)
+    picked_up_for_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='attendee.id', unique=True, nullable=True)
+    picked_up_by: 'Attendee' = Relationship(sa_relationship=relationship(
         Attendee,
-        primaryjoin='MerchPickup.picked_up_by_id == Attendee.id',
-        cascade='save-update,merge,refresh-expire,expunge')
-    picked_up_for = relationship(
+        primaryjoin='MerchPickup.picked_up_by_id == Attendee.id'))
+    picked_up_for: 'Attendee' = Relationship(sa_relationship=relationship(
         Attendee,
-        primaryjoin='MerchPickup.picked_up_for_id == Attendee.id',
-        cascade='save-update,merge,refresh-expire,expunge')
+        primaryjoin='MerchPickup.picked_up_for_id == Attendee.id'))
 
 
-class MPointsForCash(MagModel):
-    attendee_id = Column(UUID, ForeignKey('attendee.id'))
-    amount = Column(Integer)
-    when = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+class MPointsForCash(MagModel, table=True):
+    attendee_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='attendee.id', ondelete='CASCADE')
+    attendee: 'Attendee' = Relationship(back_populates="mpoints_for_cash")
+
+    amount: int = 0
+    when: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
 
 
-class NoShirt(MagModel):
+class NoShirt(MagModel, table=True):
     """
     Used to track when someone tried to pick up a shirt they were owed when we
     were out of stock, so that we can contact them later.
     """
-    attendee_id = Column(UUID, ForeignKey('attendee.id'), unique=True)
+
+    attendee_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='attendee.id', ondelete='CASCADE', unique=True)
+    attendee: 'Attendee' = Relationship(back_populates="no_shirt")
 
 
-class OldMPointExchange(MagModel):
-    attendee_id = Column(UUID, ForeignKey('attendee.id'))
-    amount = Column(Integer)
-    when = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+class OldMPointExchange(MagModel, table=True):
+    attendee_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='attendee.id', ondelete='CASCADE')
+    attendee: 'Attendee' = Relationship(back_populates="old_mpoint_exchanges")
+
+    amount: int = 0
+    when: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
 
 
-class Sale(MagModel):
-    attendee_id = Column(UUID, ForeignKey('attendee.id', ondelete='set null'), nullable=True)
-    what = Column(UnicodeText)
-    cash = Column(Integer, default=0)
-    mpoints = Column(Integer, default=0)
-    when = Column(UTCDateTime, default=lambda: datetime.now(UTC))
-    reg_station = Column(Integer, nullable=True)
-    payment_method = Column(Choice(c.SALE_OPTS), default=c.MERCH)
+class Sale(MagModel, table=True):
+    attendee_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='attendee.id', nullable=True)
+    attendee: 'Attendee' = Relationship(back_populates="sales")
+
+    what: str = ''
+    cash: int = 0
+    mpoints: int = 0
+    when: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
+    reg_station: int | None = Field(nullable=True)
+    payment_method: int = Field(sa_column=Column(Choice(c.SALE_OPTS)), default=c.MERCH)
 
 
-class ModelReceipt(MagModel):
+class ModelReceipt(MagModel, table=True):
     """
     Attendees, groups, and art show apps have a running receipt that has items and transactions added to it dynamically.
 
@@ -97,10 +103,17 @@ class ModelReceipt(MagModel):
     as during prereg, there may be multiple receipt transactions created with the same reference ID across multiple
     receipts.
     """
-    invoice_num = Column(Integer, default=0)
-    owner_id = Column(UUID, index=True)
-    owner_model = Column(UnicodeText)
-    closed = Column(UTCDateTime, nullable=True)
+    invoice_num: int = 0
+    owner_id: str = Field(sa_type=Uuid(as_uuid=False), index=True)
+    owner_model: str = ''
+    closed: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
+
+    receipt_txns: list['ReceiptTransaction'] = Relationship(
+        back_populates="receipt", sa_relationship_kwargs={'lazy': 'selectin', 'cascade': 'all,delete-orphan', 'passive_deletes': True})
+    receipt_items: list['ReceiptItem'] = Relationship(
+        back_populates="receipt", sa_relationship_kwargs={'lazy': 'selectin', 'cascade': 'all,delete-orphan', 'passive_deletes': True})
+    receipt_discounts: list ['ReceiptDiscount'] = Relationship(
+        back_populates="receipt", sa_relationship_kwargs={'lazy': 'selectin', 'cascade': 'all,delete-orphan', 'passive_deletes': True})
 
     def close_all_items(self, session):
         for item in self.open_receipt_items:
@@ -110,10 +123,12 @@ class ModelReceipt(MagModel):
                 if item.amount < 0:
                     latest_txn = self.sorted_txns[-1]
                 else:
-                    latest_txn = sorted([txn for txn in self.receipt_txns if txn.amount > 0],
-                                        key=lambda x: x.added, reverse=True)[0]
-                
-                item.receipt_txn = latest_txn
+                    pos_txns = sorted([txn for txn in self.receipt_txns if txn.amount > 0],
+                                      key=lambda x: x.added, reverse=True)
+                    if pos_txns:
+                        latest_txn = pos_txns[0]
+                        item.receipt_txn = latest_txn
+
                 item.closed = datetime.now()
             session.add(item)
         session.commit()
@@ -216,12 +231,20 @@ class ModelReceipt(MagModel):
         ), 0)
     
     @property
+    def discount_total(self):
+        return sum([(discount.applicable_discount * 100) for discount in self.receipt_discounts])
+    
+    @classproperty
+    def discount_total_sql(cls):
+        return coalesce(func.sum(ReceiptDiscount.applicable_discount * 100), 0)
+    
+    @property
     def txn_total(self):
         return self.payment_total - self.refund_total
 
     @property
     def current_receipt_amount(self):
-        return self.item_total - self.txn_total
+        return self.item_total - self.discount_total - self.txn_total
 
     @property
     def current_amount_owed(self):
@@ -237,10 +260,12 @@ class ModelReceipt(MagModel):
             return "{} in {}".format(format_currency(abs(self.txn_total / 100)),
                                      "Payments" if self.txn_total >= 0 else "Refunds")
 
-        return "{} in {} and {} in {} = {} owe {}".format(format_currency(abs(self.item_total / 100)),
+        return "{} in {} and {} in {}{} = {} owe {}".format(format_currency(abs(self.item_total / 100)),
                                                           "Purchases" if self.item_total >= 0 else "Credit",
                                                           format_currency(abs(self.txn_total / 100)),
                                                           "Payments" if self.txn_total >= 0 else "Refunds",
+                                                          f", plus {format_currency(self.discount_total / 100)} in discounts"
+                                                          if self.discount_total else '',
                                                           "They" if self.current_receipt_amount >= 0 else "We",
                                                           format_currency(abs(self.current_receipt_amount / 100)))
     
@@ -250,7 +275,7 @@ class ModelReceipt(MagModel):
         cls = Session.resolve_model(self.owner_model)
         if cls in [Attendee, Group]:
             with Session() as session:
-                model = session.query(cls).filter_by(id=self.owner_id).first()
+                model = session.get(cls, self.owner_id)
                 if model and model.is_dealer:
                     return c.DEALER_RECEIPT_ITEM
         return getattr(cls, 'department')
@@ -299,7 +324,7 @@ class ModelReceipt(MagModel):
             if not refunds:
                 session.add_all(receipt_manager.items_to_add)
             for _, (refund_amount, txns) in refunds.items():
-                refund = RefundRequest(txns, refund_amount, skip_errors=True)
+                refund = RefundRequest(session, txns, refund_amount, skip_errors=True)
 
                 error = refund.process_refund()
                 if error:
@@ -312,7 +337,7 @@ class ModelReceipt(MagModel):
         return refund_total, ''
 
 
-class ReceiptTransaction(MagModel):
+class ReceiptTransaction(MagModel, table=True):
     """
     Transactions have two key properties: whether or not they were done through Stripe,
         and whether they represent a payment or a refund.
@@ -329,34 +354,37 @@ class ReceiptTransaction(MagModel):
         plus it allows admins to refund Stripe payments per item.
     """
 
-    receipt_id = Column(UUID, ForeignKey('model_receipt.id', ondelete='SET NULL'), nullable=True)
-    receipt = relationship('ModelReceipt', foreign_keys=receipt_id,
-                           cascade='save-update, merge',
-                           backref=backref('receipt_txns', cascade='save-update, merge'))
-    receipt_info_id = Column(UUID, ForeignKey('receipt_info.id', ondelete='SET NULL'), nullable=True)
-    receipt_info = relationship('ReceiptInfo', foreign_keys=receipt_info_id,
-                                cascade='save-update, merge',
-                                backref=backref('receipt_txns', cascade='save-update, merge'))
-    refunded_txn_id = Column(UUID, ForeignKey('receipt_transaction.id', ondelete='SET NULL'), nullable=True)
-    refunded_txn = relationship('ReceiptTransaction', foreign_keys='ReceiptTransaction.refunded_txn_id',
-                                backref=backref('refund_txns', order_by='ReceiptTransaction.added'),
-                                cascade='save-update,merge,refresh-expire,expunge',
-                                remote_side='ReceiptTransaction.id',
-                                single_parent=True)
-    refunded = Column(Integer, default=0)
-    intent_id = Column(UnicodeText)
-    charge_id = Column(UnicodeText)
-    refund_id = Column(UnicodeText)
-    method = Column(Choice(c.PAYMENT_METHOD_OPTS), default=c.STRIPE)
-    department = Column(Choice(c.RECEIPT_ITEM_DEPT_OPTS), default=c.OTHER_RECEIPT_ITEM)
-    amount = Column(Integer)
-    txn_total = Column(Integer, default=0)
-    processing_fee = Column(Integer, default=0)
-    added = Column(UTCDateTime, default=lambda: datetime.now(UTC))
-    on_hold = Column(Boolean, default=False)
-    cancelled = Column(UTCDateTime, nullable=True)
-    who = Column(UnicodeText)
-    desc = Column(UnicodeText)
+    receipt_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='model_receipt.id', ondelete='CASCADE')
+    receipt: 'ModelReceipt' = Relationship(back_populates="receipt_txns", sa_relationship_kwargs={'lazy': 'joined'})
+    
+    receipt_info_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='receipt_info.id', nullable=True)
+    receipt_info: 'ReceiptInfo' = Relationship(back_populates="receipt_txns", sa_relationship_kwargs={'lazy': 'select'})
+
+    refunded_txn_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='receipt_transaction.id', nullable=True)
+    refunded_txn: 'ReceiptTransaction' = Relationship(
+        back_populates="refund_txns",
+        sa_relationship_kwargs={'foreign_keys': 'ReceiptTransaction.refunded_txn_id', 'remote_side': 'ReceiptTransaction.id'})
+    refund_txns: list['ReceiptTransaction'] = Relationship(
+        back_populates="refunded_txn",
+        sa_relationship_kwargs={'order_by': 'ReceiptTransaction.added'})
+    
+    refunded: int = 0
+    intent_id: str = ''
+    charge_id: str = ''
+    refund_id: str = ''
+    method: int = Field(sa_column=Column(Choice(c.PAYMENT_METHOD_OPTS)), default=c.STRIPE)
+    department: int = Field(sa_column=Column(Choice(c.RECEIPT_ITEM_DEPT_OPTS)), default=c.OTHER_RECEIPT_ITEM)
+    amount: int = 0
+    txn_total: int = 0
+    processing_fee: int = 0
+    added: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
+    on_hold: bool = False
+    cancelled: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
+    who: str = ''
+    desc: str = ''
+
+    receipt_items: list['ReceiptItem'] = Relationship(
+        back_populates="receipt_txn")
 
     @property
     def available_actions(self):
@@ -499,14 +527,14 @@ class ReceiptTransaction(MagModel):
         except Exception as e:
             log.error(e)
 
-    def check_paid_from_stripe(self, intent=None):
+    def check_paid_from_stripe(self, session, intent=None):
         if self.charge_id or c.AUTHORIZENET_LOGIN_ID or self.method not in [c.STRIPE, c.MANUAL]:
             return
 
         intent = intent or self.get_stripe_intent()
         if intent and intent.status == "succeeded":
             new_charge_id = intent.latest_charge
-            ReceiptManager.mark_paid_from_stripe_intent(intent)
+            ReceiptManager.mark_paid_from_stripe_intent(session, intent)
             return new_charge_id
 
     def update_amount_refunded(self):
@@ -535,30 +563,184 @@ class ReceiptTransaction(MagModel):
             return "You cannot delete Stripe transactions."
 
 
-class ReceiptItem(MagModel):
-    purchaser_id = Column(UUID, index=True, nullable=True)
-    receipt_id = Column(UUID, ForeignKey('model_receipt.id', ondelete='SET NULL'), nullable=True)
-    receipt = relationship('ModelReceipt', foreign_keys=receipt_id,
-                           cascade='save-update, merge',
-                           backref=backref('receipt_items', cascade='save-update, merge'))
-    txn_id = Column(UUID, ForeignKey('receipt_transaction.id', ondelete='SET NULL'), nullable=True)
-    receipt_txn = relationship('ReceiptTransaction', foreign_keys=txn_id,
-                               cascade='save-update, merge',
-                               backref=backref('receipt_items', cascade='save-update, merge'))
-    fk_id = Column(UUID, index=True, nullable=True)
-    fk_model = Column(UnicodeText)
-    department = Column(Choice(c.RECEIPT_ITEM_DEPT_OPTS), default=c.OTHER_RECEIPT_ITEM)
-    category = Column(Choice(c.RECEIPT_CATEGORY_OPTS), default=c.OTHER)
-    amount = Column(Integer)
-    comped = Column(Boolean, default=False)
-    reverted = Column(Boolean, default=False)
-    count = Column(Integer, default=1)
-    added = Column(UTCDateTime, default=lambda: datetime.now(UTC))
-    closed = Column(UTCDateTime, nullable=True)
-    who = Column(UnicodeText)
-    desc = Column(UnicodeText)
-    admin_notes = Column(UnicodeText)
-    revert_change = Column(JSON, default={}, server_default='{}')
+class ReceiptDiscount(MagModel, table=True):
+    # A special type of receipt item for Attendee receipts that is calculated based on the current state of the attendee
+    # Prevents cases where a discount (especially a percentage discount) becomes incorrect due to changes on the attendee,
+    # e.g., getting a $50 age discount on a $100 badge, then downgrading to a $60 badge but still receiving the $50 discount
+
+    receipt_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='model_receipt.id', ondelete='CASCADE')
+    receipt: 'ModelReceipt' = Relationship(back_populates="receipt_discounts", sa_relationship_kwargs={'lazy': 'joined'})
+
+    promo_code_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='promo_code.id', nullable=True, index=True)
+    promo_code: 'PromoCode' = Relationship(back_populates="receipt_discounts", sa_relationship_kwargs={'lazy': 'select'})
+
+    department: int = Field(sa_column=Column(Choice(c.RECEIPT_ITEM_DEPT_OPTS)), default=c.REG_RECEIPT_ITEM)
+    category: int = Field(sa_column=Column(Choice(c.RECEIPT_CATEGORY_OPTS)), default=c.OTHER)
+    desc: str = ''
+    who: str = ''
+    added: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
+
+    discount: int | None = Field(nullable=True, default=None)
+    applicable_discount: int = 0
+    discount_str: str = ''
+    discount_type: int = Field(sa_column=Column(Choice(c.DISCOUNT_TYPE_OPTS)), default=c.FIXED_DISCOUNT)
+    discount_on: int = Field(sa_column=Column(Choice(c.DISCOUNT_ON_OPTS)), default=c.BASE_BADGE)
+
+    def set_discount(self, attendee):
+        from uber.receipt_items import base_badge_cost
+
+        real_base_cost = None
+        base_cost = 0
+        category = c.OTHER
+        if self.discount_on == c.EVERYTHING:
+            base_cost = attendee.calc_default_cost(include_discounts=False)
+            discount_label = "everything"
+        elif self.discount_on == c.BASE_BADGE:
+            if attendee.overridden_price:
+                self.applicable_discount = 0
+                self.discount_str = ''
+                return
+            if self.department == c.REG_RECEIPT_ITEM:
+                category = c.BADGE_DISCOUNT
+            if attendee.badge_cost:
+                base_cost = attendee.badge_cost
+            else:
+                _, base_cost, _ = base_badge_cost(attendee)
+                base_cost = base_cost / 100
+            if attendee.badge_type in c.BADGE_TYPE_PRICES:
+                discount_label = f"{c.BADGES[c.ATTENDEE_BADGE]} badge"
+            else:
+                discount_label = f"{attendee.badge_type_label} badge"
+        elif self.discount_on == c.GROUP_MEMBERS:
+            # TODO: Promo codes should apply to each badge individually
+            if getattr(attendee, 'badges', None):
+                # During prereg we set the number of promo code badges on the attendee model
+                base_cost = c.get_group_price() * int(attendee.badges)
+                discount_label = f"group badge (x{attendee.badges})"
+            elif attendee.promo_code_groups:
+                num_codes = 0
+                for code in attendee.promo_code_groups[0].promo_codes:
+                    base_cost += code.cost
+                    num_codes += 1
+                discount_label = f"group badge (x{num_codes})"
+        elif self.discount_on in list(c.BADGE_TYPE_PRICES) and attendee.badge_type in c.BADGE_TYPE_PRICES:
+            base_cost = c.BADGE_TYPE_PRICES[attendee.badge_type] - attendee.new_badge_cost
+            discount_label = f"{attendee.badge_type_label} badge upgrade"
+            if self.discount_on in c.BADGE_TYPE_PRICES:
+                real_base_cost = c.BADGE_TYPE_PRICES[self.discount_on] - attendee.new_badge_cost
+        elif self.discount_on in list(c.DONATION_TIERS):
+            base_cost = attendee.amount_extra
+            discount_label = f"{c.DONATION_TIERS[attendee.amount_extra]} merch"
+            if self.discount_on in c.DONATION_TIERS:
+                real_base_cost = c.DONATION_TIERS[self.discount_on]
+        else:
+            base_cost, discount_label = self.set_other_discount(attendee)
+
+        self.applicable_discount, self.discount_str, self.category = self.get_discount_info(base_cost, discount_label, real_base_cost)
+        if self.category is None:
+            self.category = category
+    
+    def get_discount_info(self, base_cost, discount_label, real_base_cost=None):
+        # Returns a tuple for the applicable discount amount, the string for the descriptor,
+        # and the category (or None if the category should not be changed)
+
+        if not base_cost:
+            return (0, '', None)
+        if not self.discount:
+            if real_base_cost is None or real_base_cost >= base_cost:
+                return (base_cost, f"Free {discount_label}", c.ITEM_COMP)
+            else:
+                return (real_base_cost, f"${self.applicable_discount} off {discount_label}", None)
+        
+        base_cost = base_cost if real_base_cost is None or real_base_cost > base_cost else real_base_cost
+
+        if self.discount_type == c.FIXED_DISCOUNT:
+            discount_str = f"${self.applicable_discount} off {discount_label}"
+            if base_cost > self.discount:
+                return (self.discount, discount_str, None)
+            else:
+                return (self.discount, discount_str, c.ITEM_COMP)
+        elif self.discount_type == c.FIXED_PRICE:
+            if base_cost > self.discount:
+                discount = abs(self.discount - base_cost)
+                return (discount, f"{discount_label} for ${self.discount} (${discount} off)", None)
+            else:
+                return (0, '', None)
+        elif self.discount_type == c.PERCENT_DISCOUNT:
+            discount = int(base_cost * (self.discount / 100.0))
+            if discount:
+                return (discount, f"{int(self.discount)}% off {discount_label} price (${discount})", None)
+            else:
+                return (0, '', None)
+    
+    def set_other_discount(self, attendee):
+        # Override in event plugins to support custom discount categories
+        return 0, ''
+
+    def get_upgrade_discount(self, update_col, preview_attendee):
+        if update_col == 'badge_type' and self.discount_on in list(c.BADGE_TYPE_PRICES) and preview_attendee.badge_type in c.BADGE_TYPE_PRICES:
+            base_cost = c.BADGE_TYPE_PRICES[preview_attendee.badge_type] - preview_attendee.new_badge_cost
+            discount_label = f"{preview_attendee.badge_type_label} badge upgrade"
+            if self.discount_on in c.BADGE_TYPE_PRICES:
+                real_base_cost = c.BADGE_TYPE_PRICES[self.discount_on] - preview_attendee.new_badge_cost
+        elif update_col == 'amount_extra' and self.discount_on in list(c.DONATION_TIERS):
+            base_cost = preview_attendee.amount_extra
+            discount_label = f"{c.DONATION_TIERS[preview_attendee.amount_extra]} merch"
+            if self.discount_on in c.DONATION_TIERS:
+                real_base_cost = c.DONATION_TIERS[self.discount_on]
+        else:
+            return (0, '', None)
+        return self.get_discount_info(base_cost, discount_label, real_base_cost)
+    
+    @property
+    def count(self):
+        return 1
+    
+    @property
+    def amount(self):
+        return self.applicable_discount * 100 * -1
+
+    def unused_warning(self, attendee):
+        discount_str = self.discount_on_label.replace("Upgrade", "upgrade").replace("Merch", "merch")
+        if not self.discount:
+            discount_str = f"FREE {discount_str}"
+        else:
+            discount_str = f"{discount_str} discount"
+
+        if self.discount_on in c.BADGE_TYPE_PRICES:
+            if attendee.badge_type not in c.BADGE_TYPE_PRICES:
+                return f"Unused {discount_str}"
+            elif not self.discount and c.BADGE_TYPE_PRICES[attendee.badge_type] < c.BADGE_TYPE_PRICES[self.discount_on]:
+                return f"{discount_str} not selected"
+        elif self.discount_on in c.DONATION_TIERS:
+            if not attendee.amount_extra:
+                return f"Unused {discount_str}"
+            elif not self.discount and attendee.amount_extra < self.discount_on:
+                return f"{discount_str} not selected"
+
+
+class ReceiptItem(MagModel, table=True):
+    receipt_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='model_receipt.id', ondelete='CASCADE')
+    receipt: 'ModelReceipt' = Relationship(back_populates="receipt_items", sa_relationship_kwargs={'lazy': 'joined'})
+
+    txn_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='receipt_transaction.id', nullable=True)
+    receipt_txn: 'ReceiptTransaction' = Relationship(back_populates="receipt_items", sa_relationship_kwargs={'lazy': 'joined'})
+    
+    purchaser_id: str | None = Field(sa_type=Uuid(as_uuid=False), index=True, nullable=True)
+    fk_id: str | None = Field(sa_type=Uuid(as_uuid=False), index=True, nullable=True)
+    fk_model: str = ''
+    department: int = Field(sa_column=Column(Choice(c.RECEIPT_ITEM_DEPT_OPTS)), default=c.OTHER_RECEIPT_ITEM)
+    category: int = Field(sa_column=Column(Choice(c.RECEIPT_CATEGORY_OPTS)), default=c.OTHER)
+    amount: int = 0
+    comped: bool = False
+    reverted: bool = False
+    count: int = 1
+    added: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
+    closed: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
+    who: str = ''
+    desc: str = ''
+    admin_notes: str = ''
+    revert_change: dict[str, Any] = Field(sa_type=JSON, default_factory=dict)
 
     @presave_adjustment
     def process_item_close(self):
@@ -618,18 +800,21 @@ class ReceiptItem(MagModel):
                 If necessary, please delete or cancel the payment first."
 
 
-class ReceiptInfo(MagModel):
-    fk_email_model = Column(UnicodeText)
-    fk_email_id = Column(UnicodeText)
-    terminal_id = Column(UnicodeText)
-    reference_id = Column(UnicodeText)
-    charged = Column(UTCDateTime)
-    voided = Column(UTCDateTime, nullable=True)
-    card_data = Column(MutableDict.as_mutable(JSONB), default={})
-    emv_data = Column(MutableDict.as_mutable(JSONB), default={})
-    txn_info = Column(MutableDict.as_mutable(JSONB), default={})
-    signature = Column(UnicodeText)
-    receipt_html = Column(UnicodeText)
+class ReceiptInfo(MagModel, table=True):
+    fk_email_model: str = ''
+    fk_email_id: str = ''
+    terminal_id: str = ''
+    reference_id: str = ''
+    charged: datetime = Field(sa_type=DateTime(timezone=True))
+    voided: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
+    card_data: dict[str, Any] = Field(sa_type=MutableDict.as_mutable(JSONB), default_factory=dict)
+    emv_data: dict[str, Any] = Field(sa_type=MutableDict.as_mutable(JSONB), default_factory=dict)
+    txn_info: dict[str, Any] = Field(sa_type=MutableDict.as_mutable(JSONB), default_factory=dict)
+    signature: str = ''
+    receipt_html: str = ''
+
+    receipt_txns: list['ReceiptTransaction'] = Relationship(
+        back_populates="receipt_info", sa_relationship_kwargs={'lazy': 'selectin'})
 
     @property
     def response_code_str(self):
@@ -652,7 +837,6 @@ class ReceiptInfo(MagModel):
     @property
     def avs_str(self):
         if not self.txn_info or not self.txn_info['fraud_info']:
-            log.error(self.txn_info['fraud_info'])
             return ''
         
         if self.receipt_txns[0].method == c.STRIPE and c.AUTHORIZENET_LOGIN_ID:
@@ -741,11 +925,11 @@ class ReceiptInfo(MagModel):
                     return "CAVV not validated."
 
 
-class TerminalSettlement(MagModel):
-    batch_timestamp = Column(UnicodeText)
-    batch_who = Column(UnicodeText)
-    requested = Column(UTCDateTime, default=lambda: datetime.now(UTC))
-    workstation_num = Column(Integer, default=0)
-    terminal_id = Column(UnicodeText)
-    response = Column(MutableDict.as_mutable(JSONB), default={})
-    error = Column(UnicodeText)
+class TerminalSettlement(MagModel, table=True):
+    batch_timestamp: str = ''
+    batch_who: str = ''
+    requested: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
+    workstation_num: int = 0
+    terminal_id: str = ''
+    response: dict[str, Any] = Field(sa_type=MutableDict.as_mutable(JSONB), default_factory=dict)
+    error: str = ''

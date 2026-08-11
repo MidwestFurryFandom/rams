@@ -12,14 +12,13 @@ To perform these validations, call the "check" method on the instance you're val
 on success and a string error message on validation failure.
 """
 import re
+import logging
 from datetime import datetime, timedelta
 from functools import wraps
 from urllib.request import urlopen
 
 import cherrypy
 import phonenumbers
-from pockets.autolog import log
-from pockets import sluggify
 from sqlalchemy import and_, func, or_
 
 from uber.badge_funcs import get_real_badge_type
@@ -27,13 +26,14 @@ from uber.config import c
 from uber.custom_tags import format_currency, full_date_local
 from uber.decorators import prereg_validation, validation
 from uber.models import (AccessGroup, AdminAccount, ApiToken, Attendee, ArtShowApplication, ArtShowPiece,
-                         AttendeeTournament, Attraction, AttractionFeature, ArtShowBidder, DeptRole, Event,
+                         Attraction, AttractionFeature, ArtShowBidder, DeptRole, Event,
                          GuestDetailedTravelPlan, IndieDeveloper, IndieGame, IndieGameCode, IndieJudge, IndieStudio,
-                         Job, ArtistMarketplaceApplication, MITSApplicant, MITSDocument, MITSGame, MITSPicture, MITSTeam,
+                         Job, ArtistMarketplaceApplication, MITSApplicant, MITSGame, MITSTeam,
                          PromoCode, PromoCodeGroup, Sale, Session, WatchList)
-from uber.utils import localized_now, valid_email, get_age_from_birthday
+from uber.utils import localized_now, valid_email, get_age_from_birthday, slugify
 from uber.payments import PreregCart
 
+log = logging.getLogger(__name__)
 
 AccessGroup.required = [('name', 'Name')]
 
@@ -86,7 +86,7 @@ def duplicate_admin(account):
 def has_email_address(account):
     if account.is_new:
         with Session() as session:
-            if session.query(Attendee).filter_by(id=account.attendee_id).first().email == '':
+            if session.get(Attendee, account.attendee_id).email == '':
                 return "Attendee doesn't have a valid email set"
 
 
@@ -95,7 +95,7 @@ ApiToken.required = [('name', 'Name'), ('description', 'Intended Usage'), ('acce
 
 @validation.ApiToken
 def admin_has_required_api_access(api_token):
-    admin_account_id = cherrypy.session.get('account_id')
+    admin_account_id = cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None))
     if api_token.is_new and admin_account_id != api_token.admin_account_id:
         return 'You may not create an API token for another user'
 
@@ -227,6 +227,12 @@ PromoCode.required = [
 
 
 @validation.PromoCode
+def everything_only(promo_code):
+    if c.EVERYTHING in promo_code.discount_on_ints and len(promo_code.discount_on_ints) > 1:
+        return "Promo codes that discount the overall price cannot also discount other categories."
+
+
+@validation.PromoCode
 def valid_discount(promo_code):
     if promo_code.discount:
         try:
@@ -249,13 +255,23 @@ def valid_uses_allowed(promo_code):
 
 
 @validation.PromoCode
-def no_unlimited_free_badges(promo_code):
+def no_unlimited_comp_codes(promo_code):
     if promo_code.is_new \
             or promo_code.uses_allowed != promo_code.orig_value_of('uses_allowed') \
             or promo_code.discount != promo_code.orig_value_of('discount') \
             or promo_code.discount_type != promo_code.orig_value_of('discount_type'):
         if promo_code.is_unlimited and promo_code.is_free:
-            return 'Unlimited-use, free-badge promo codes are not allowed.'
+            return 'You cannot make an unlimited-use comp promo code.'
+
+
+@validation.PromoCode
+def no_comp_group_badges(promo_code):
+    if promo_code.is_new \
+        or promo_code.discount_on != promo_code.orig_value_of('discount_on') \
+        or promo_code.discount != promo_code.orig_value_of('discount') \
+        or promo_code.discount_type != promo_code.orig_value_of('discount_type'):
+        if promo_code.is_free and c.GROUP_MEMBERS in promo_code.discount_on_ints:
+            return 'You cannot create a comp promo code for group badges. Consider making a free promo code group instead.'
 
 
 @validation.PromoCode
@@ -270,35 +286,6 @@ def no_dupe_code(promo_code):
 PromoCodeGroup.required = [
     ('name', 'Name')
 ]
-
-# =============================
-# tournaments
-# =============================
-
-AttendeeTournament.required = [
-    ('first_name', 'First Name'),
-    ('last_name', 'Last Name'),
-    ('email', 'Email Address'),
-    ('game', 'Game Title'),
-    ('availability', 'Your Availability'),
-    ('format', 'Tournament Format'),
-    ('experience', 'Past Experience'),
-    ('needs', 'Your Needs'),
-    ('why', '"Why?"'),
-]
-
-
-@validation.AttendeeTournament
-def attendee_tournament_email(app):
-    if not re.match(c.EMAIL_RE, app.email):
-        return 'You did not enter a valid email address'
-
-
-@validation.AttendeeTournament
-def attendee_tournament_cellphone(app):
-    if app.cellphone and invalid_phone_number(app.cellphone):
-        return 'You did not enter a valid cellphone number'
-
 
 @validation.LotteryApplication
 def room_meets_night_requirements(app):
@@ -446,15 +433,9 @@ MITSGame.required = [
 ]
 
 
-MITSDocument.required = [
-    ('description', 'Description')
-]
-
-
 @validation.MITSTeam
 @validation.MITSApplicant
 @validation.MITSGame
-@validation.MITSPicture
 @validation.MITSTimes
 def is_saveable(inst):
     team = inst if isinstance(inst, MITSTeam) else inst.team
@@ -527,7 +508,7 @@ Attraction.required = [
 @validation.Attraction
 def slug_not_existing(attraction):
     with Session() as session:
-        slug = sluggify(attraction.name)
+        slug = slugify(attraction.name)
         if session.query(Attraction).filter(Attraction.id != attraction.id,
                                             Attraction.slug == slug).first():
             return f"Another attraction has an identical URL to this one ({slug}). \
@@ -542,7 +523,7 @@ AttractionFeature.required = [
 @validation.AttractionFeature
 def slug_not_existing(feature):
     with Session() as session:
-        slug = sluggify(feature.name)
+        slug = slugify(feature.name)
         if session.query(AttractionFeature).filter(AttractionFeature.id != feature.id,
                                                    AttractionFeature.slug == slug).first():
             return f"Another attraction feature has an identical URL to this one ({slug}). \
@@ -829,22 +810,23 @@ def promo_code_is_useful(attendee):
             if group and group.total_cost == 0:
                 return
 
-    if attendee.is_new and attendee.promo_code:
-        if not attendee.is_unpaid:
-            return ('promo_code', "You can't apply a promo code after you've paid or if you're in a group.")
-        elif attendee.is_dealer:
-            return ('promo_code', "You can't apply a promo code to a {}.".format(c.DEALER_REG_TERM))
-        elif attendee.age_discount != 0:
-            return ('promo_code',
-                    "You are already receiving an age based discount, you can't use a promo code on top of that.")
-        elif attendee.badge_type == c.ONE_DAY_BADGE or attendee.is_presold_oneday:
-            return ('promo_code', "You can't apply a promo code to a one day badge.")
-        elif attendee.overridden_price:
-            return ('promo_code',
-                    "You already have a special badge price, you can't use a promo code on top of that.")
-        elif attendee.badge_cost_with_promo_code >= attendee.calculate_badge_cost():
-            return ('promo_code',
-                    "That promo code doesn't make your badge any cheaper. You may already have other discounts.")
+    if attendee.is_new and attendee.promo_code and not attendee.orig_value_of('promo_code'):
+        if attendee.paid in [c.HAS_PAID, c.PAID_BY_GROUP, c.REFUNDED]:
+            return ('promo_code', f"You can't apply a promo code after you've paid or if you're in a group.")
+        if attendee.promo_code_discounts_badge:
+            if attendee.is_dealer:
+                return ('promo_code', "You can't apply a promo code to a {}.".format(c.DEALER_REG_TERM))
+            elif attendee.age_discount != 0:
+                return ('promo_code',
+                        "You are already receiving an age based discount, you can't use a promo code on top of that.")
+            elif attendee.badge_type == c.ONE_DAY_BADGE or attendee.is_presold_oneday:
+                return ('promo_code', "You can't apply a promo code to a one day badge.")
+            elif attendee.overridden_price:
+                return ('promo_code',
+                        "You already have a special badge price, you can't use a promo code on top of that.")
+            elif attendee.badge_cost_with_promo_code >= attendee.calculate_badge_cost():
+                return ('promo_code',
+                        "That promo code doesn't make your badge any cheaper. You may already have other discounts.")
 
 
 @prereg_validation.Attendee
@@ -897,4 +879,7 @@ def group_leadership(attendee):
 @prereg_validation.Group
 def edit_only_correct_statuses(group):
     if group.status not in c.DEALER_EDITABLE_STATUSES:
-        return "You cannot change your {} after it has been {}.".format(c.DEALER_APP_TERM, group.status_label)
+        if c.HIDE_DEALER_STATUS:
+            return f"Your {c.DEALER_APP_TERM} is currently being reviewed and cannot be edited."
+        else:
+            return f"You cannot change your {c.DEALER_APP_TERM} after it has been {group.status_label}."

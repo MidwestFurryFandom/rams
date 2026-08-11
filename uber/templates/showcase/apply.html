@@ -1,10 +1,24 @@
 {% import 'forms/macros.html' as form_macros with context %}
 {% extends "preregistration/preregbase.html" %}
 {% set title_text = c.EVENT_NAME ~ "Showcase Application" %}
-{% block backlink %}{% endblock %}
 {% block content %}
 
   <div class="card card-body">
+    {% if logged_in_account and logged_in_account.indie_studios %}
+      <div class="alert alert-info">
+        {% if logged_in_account.indie_studios|length == 1 %}
+        You have already registered the studio "<a href="../showcase/index?id={{ logged_in_account.indie_studios[0].id }}">{{ logged_in_account.indie_studios[0].name }}</a>". You can use the form below if you wish to apply under a second studio.
+        {% else %}
+        You have already registered the following studios:
+        <ul>
+          {% for studio in logged_in_account.indie_studios %}
+          <li><a href="../showcase/index?id={{ studio.id }}">{{ studio.name }}</a></li>
+          {% endfor %}
+        </ul>
+        {% if c.INDIE_SHOWCASE_OPEN %}You can use the form below if you wish to apply under a new studio.{% endif %}
+        {% endif %}
+      </div>
+    {% endif %}
     <h2>{{ c.EVENT_NAME }} Indies</h2>
     {% if not c.INDIE_SHOWCASE_OPEN and not c.HAS_SHOWCASE_ADMIN_ACCESS %}
         <p>Applications are currently closed for {{ c.ENABLED_INDIES_STR }}. Please refer to the schedule below.</p>
@@ -17,13 +31,13 @@
         {% if c.HAS_SHOWCASE_ADMIN_ACCESS and not c.INDIE_SHOWCASE_OPEN %}
         <div class="alert alert-warning">
             ADMIN NOTE: Because you are logged in as a MIVS or Indie Arcade admin, you can still use this form to manually enter a new
-            studio. For non-admin users, they will see a message about the deadline being passed.
+            studio. For non-admin users, they will see a message about showcase not being open.
         </div>
         {% endif %}
         <p>
             Welcome to {{ c.EVENT_NAME }} Indies!
              To create a studio, please fill out the information below for you and your studio.
-            If you've already created a studio, check your confirmation email for a link to access your studio page.
+            If you've already created a studio, {% if c.ATTENDEE_ACCOUNTS_ENABLED %}you can access it on <a href="../preregistration/homepage">your homepage</a>{% else %}check your confirmation email for a link to access your studio page{% endif %}.
         </p>
         <p>
             After creating a studio, you will be able to enter games into {{ c.ENABLED_INDIES_STR }} according to the schedule below.
