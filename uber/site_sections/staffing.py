@@ -1,7 +1,7 @@
 import cherrypy
 from datetime import datetime, timedelta
 from pockets.autolog import log
-import ics
+#import ics
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.exc import NoResultFound
 
