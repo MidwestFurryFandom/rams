@@ -1,5 +1,4 @@
 import json
-#import ics
 import pytz
 import cherrypy
 
