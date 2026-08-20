@@ -758,8 +758,12 @@ class Root:
         if not list(PreregCart.unpaid_preregs.values()):
             if qr_code_id:
                 current_pickup_group = session.query(BadgePickupGroup).filter_by(public_id=qr_code_id).first()
-                for attendee in current_pickup_group.attendees:
-                    registrations_list.append(attendee.full_name)
+                if not current_pickup_group:
+                    single_attendee = session.query(Attendee).filter_by(public_id=qr_code_id).first()
+                    registrations_list.append(single_attendee.full_name)
+                else:
+                    for attendee in current_pickup_group.attendees:
+                        registrations_list.append(attendee.full_name)
             elif c.ATTENDEE_ACCOUNTS_ENABLED:
                 qr_code_id = qr_code_id or (account_pickup_group.public_id if account_pickup_group else '')
 
@@ -803,6 +807,10 @@ class Root:
                 session.add(old_attendee)
                 del cherrypy.session['imported_attendee_ids'][attendee.id]
 
+            if attendee.badges:
+                pc_group = session.create_promo_code_group(attendee, attendee.name, int(attendee.badges) - 1)
+                session.add(pc_group)
+
             if account:
                 session.add_attendee_to_account(attendee, account)
             else:
@@ -814,6 +822,7 @@ class Root:
             total_cost = sum([(item.amount * item.count) for item in receipt_items])
             if total_cost == 0:
                 attendee.paid = c.NEED_NOT_PAY
+
         for group in cart.groups:
             session.add(group)
 
@@ -848,6 +857,10 @@ class Root:
                 attendee.badge_cost = attendee.calculate_badge_cost()
                 attendee.paid = c.NEED_NOT_PAY
 
+                if attendee.badges:
+                    pc_group = session.create_promo_code_group(attendee, attendee.name, int(attendee.badges) - 1)
+                    session.add(pc_group)
+
                 if attendee.id in cherrypy.session.setdefault('imported_attendee_ids', {}):
                     old_attendee = session.attendee(cherrypy.session['imported_attendee_ids'][attendee.id])
                     old_attendee.current_attendee = attendee
@@ -861,6 +874,12 @@ class Root:
 
             for group in cart.groups:
                 session.add(group)
+            
+            session.commit()
+
+            if c.ATTENDEE_ACCOUNTS_ENABLED:
+                account.set_account_owner()
+                session.commit()
 
             PreregCart.unpaid_preregs.clear()
             PreregCart.paid_preregs.extend(cart.targets)
@@ -1987,6 +2006,11 @@ class Root:
             messages.append(f"Could not cancel registration{'s' if len(failed_attendees) > 1 else ''} for \
                             {readable_join([a.full_name for a in failed_attendees])}. \
                             Please contact {email_only(c.REGDESK_EMAIL)} for assistance.")
+        
+        session.commit()
+        if c.ATTENDEE_ACCOUNTS_ENABLED and attendee.managers:
+            attendee.managers[0].set_account_owner()
+            session.commit()
 
         raise HTTPRedirect("homepage?&message={}", ' '.join(messages))
 
@@ -2045,6 +2069,11 @@ class Root:
         attendee.badge_status = c.REFUNDED_STATUS
         for shift in attendee.shifts:
             session.delete(shift)
+
+        if c.ATTENDEE_ACCOUNTS_ENABLED and attendee.managers:
+            attendee.managers[0].set_account_owner()
+            session.commit()
+
         raise HTTPRedirect('{}?message={}', page_redirect, success_message)
 
     @requires_account(Attendee)

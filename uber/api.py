@@ -23,7 +23,7 @@ from uber.barcode import get_badge_num_from_barcode
 from uber.config import c
 from uber.errors import CSRFException
 from uber.models import (AdminAccount, ApiToken, Attendee, AttendeeAccount, Attraction, AttractionFeature, AttractionEvent,
-                         BadgeInfo, Department, DeptMembership,
+                         ArtShowApplication, ArtistMarketplaceApplication, BadgeInfo, Department, DeptMembership,
                          DeptRole, Event, IndieJudge, IndieStudio, Job, Session, Shift, Group,
                          GuestGroup, Room, HotelRequests, RoomAssignment)
 from uber.models.badge_printing import PrintJob
@@ -897,7 +897,7 @@ class AttendeeAccountLookup:
                 'attendees': attendees,
             }
 
-    def export(self, query, all=False):
+    def export(self, query, all=False, page=0, page_size=None):
         """
         Searches for attendee accounts by either email or id.
 
@@ -905,6 +905,8 @@ class AttendeeAccountLookup:
         queries.
 
         `all` ignores the query and returns all attendee accounts.
+
+        `page` and `page_size` are only used when `all` is true and paginate the results.
 
         Example:
         <pre>account.email@example.com, e3a670c4-8f7e-4d62-841d-49f73f58d8b1</pre>
@@ -915,7 +917,15 @@ class AttendeeAccountLookup:
 
         with Session() as session:
             if all:
-                all_accounts = session.query(AttendeeAccount).all()
+                all_accounts = session.query(AttendeeAccount).order_by(AttendeeAccount.email,
+                               AttendeeAccount.id)
+                if page_size:
+                    all_accounts = all_accounts.limit(page_size)
+                if page:
+                    all_accounts = all_accounts.offset(page*page_size)
+                all_accounts = all_accounts.options(subqueryload(
+                    AttendeeAccount.attendees)
+                    ).all()
             else:
                 email_accounts = []
                 if emails:
@@ -1262,7 +1272,7 @@ class GroupLookup:
 
             return {
                 'attendees': attendees,
-                'group_leader_id': group.leader.id,
+                'group_leader_id': group.leader.id if group.leader else '',
                 'unassigned_badge_type': unassigned_badge_type,
                 'unassigned_ribbon': unassigned_ribbon,
             }
