@@ -433,7 +433,7 @@ AutomatedEmailFixture(
     Attendee,
     f'{c.EVENT_NAME} group registration confirmed',
     'reg_workflow/attendee_confirmation.html',
-    "lambda a: a.group and (a.id != a.group.leader_id or a.group.cost == 0) and not a.placeholder \
+    "lambda a: a.first_name and a.group and (a.id != a.group.leader_id or a.group.cost == 0) and not a.placeholder \
         and a.paid == c.PAID_BY_GROUP",
     'attendee_group_reg_confirmation',
     sender=c.REGDESK_EMAIL,
