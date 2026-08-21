@@ -99,7 +99,11 @@
 {% endif %}
 
 <div class="row g-3 mb-3">
+    {% if c.HOTEL_LOTTERY_ROOM_INVENTORY %}
     <div class="col-sm">{{ form_macros.input(lottery_admin_info.final_status_hidden) }}</div>
+    {% else %}
+    <input type="hidden" name="final_status_hidden" value="{{ lottery_admin_info.final_status_hidden.data }}" />
+    {% endif %}
     <div class="col-sm">{{ form_macros.input(lottery_admin_info.can_edit) }}</div>
     <div class="col-sm">{{ form_macros.input(lottery_admin_info.is_staff_entry) }}</div>
 </div>
@@ -114,6 +118,7 @@
     </div>
 </div>
 
+{% if c.HOTEL_LOTTERY_ROOM_INVENTORY %}
 <div class="row g-sm-3 mb-3">
     <div class="col-sm">
         {{ form_macros.input(lottery_admin_info.assigned_hotel) }}
@@ -139,6 +144,9 @@
         {{ form_macros.input(lottery_admin_info.assigned_suite_type) }}
     </div>
 </div>
+{% else %}
+<input type="hidden" name="booking_url_hidden" value="{{ lottery_admin_info.booking_url_hidden.data }}" />
+{% endif %}
 
 <div class="row g-sm-3 mb-3">
     <div class="col-sm">
