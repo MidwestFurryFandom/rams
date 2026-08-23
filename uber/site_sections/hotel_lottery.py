@@ -297,7 +297,7 @@ class Root:
 
         if old_room_group:
             EmailService.queue_email(session, 'hotel_lottery_group_member_left', old_room_group,
-                                     data={'member': application})
+                                     data={'member_name': application.attendee.full_name})
         if has_actually_entered:
             EmailService.queue_email(session, 'hotel_lottery_cancelled', application)
 
@@ -647,7 +647,8 @@ class Root:
 
         for member in all_group_members:
             EmailService.queue_email(session, 'group_lottery_leader_changed', member,
-                                     data={'old_leader': application, 'new_leader': new_leader},
+                                     data={'old_leader': application, 'old_leader_name': application.group_leader_name,
+                                           'new_leader': new_leader, 'new_leader_name': new_leader.group_leader_name},
                                      replace_unsent=True)
         
         raise HTTPRedirect('index?id={}&message={}', application.id,
@@ -729,7 +730,7 @@ class Root:
 
                 EmailService.queue_email(session, 'group_lottery_member_joined', room_group,
                                          subject=f'{application.attendee.first_name} has joined your {c.EVENT_NAME} Lottery {c.HOTEL_LOTTERY_GROUP_TERM}',
-                                         data={'member': application})
+                                         data={'member_name': application.attendee.full_name})
                 
                 EmailService.queue_email(session, 'hotel_lottery_confirmation', application,
                                          data={'new_conf': got_new_conf_num,
@@ -750,7 +751,7 @@ class Root:
 
             if room_group.status in [c.COMPLETE, c.PROCESSED, c.AWARDED, c.SECURED]:
                 EmailService.queue_email(session, 'hotel_lottery_group_member_left', room_group,
-                                         data={'member': application})
+                                         data={'member_name': application.attendee.full_name}})
 
             if room_group.status == c.PROCESSED or room_group.finalized:
                 application = _clear_application(application)
