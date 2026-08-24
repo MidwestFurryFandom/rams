@@ -390,7 +390,7 @@ class EmailService:
                 log.error(f"Misconfigured email '{ident}': emails cannot have limit_one set without both a valid fixture and a to_model.")
                 return
             if replace_unsent:
-                log.error(f"Misconfigured email '{ident}': emails cannot have replace_unset set without both a valid fixture and a to_model.")
+                log.error(f"Misconfigured email '{ident}': emails cannot have replace_unsent set without both a valid fixture and a to_model.")
                 return
 
         email_handler = EmailHandler(fixture_obj, to_model, ident=ident, to=to, data=data, **kwargs)
