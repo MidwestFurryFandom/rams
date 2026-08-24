@@ -751,7 +751,7 @@ class Root:
 
             if room_group.status in [c.COMPLETE, c.PROCESSED, c.AWARDED, c.SECURED]:
                 EmailService.queue_email(session, 'hotel_lottery_group_member_left', room_group,
-                                         data={'member_name': application.attendee.full_name}})
+                                         data={'member_name': application.attendee.full_name})
 
             if room_group.status == c.PROCESSED or room_group.finalized:
                 application = _clear_application(application)
