@@ -1309,7 +1309,7 @@ class Root:
         signnow_link = ''
 
         if group.is_dealer and c.SIGNNOW_DEALER_TEMPLATE_ID and group.is_valid and group.status in c.DEALER_ACCEPTED_STATUSES:
-            signnow_request = SignNowRequest(session=session, group=group, ident="terms_and_conditions",
+            signnow_request = SignNowRequest(session=session, model=group, ident="terms_and_conditions",
                                              create_if_none=True)
 
             if not signnow_request.error_message:
@@ -1325,7 +1325,7 @@ class Root:
                         signnow_link = ''
                         signnow_document.link = signnow_link
                     elif not signnow_link:
-                        signnow_link = signnow_request.create_dealer_signing_link()
+                        signnow_link = signnow_request.create_signing_link()
                         if not signnow_request.error_message:
                             signnow_document.link = signnow_link
 
@@ -1361,22 +1361,6 @@ class Root:
             'incomplete_txn': receipt.get_last_incomplete_txn() if receipt else None,
             'message': message
         }
-
-    @requires_account(Group)
-    def download_signnow_document(self, session, id, return_to='../preregistration/group_members'):
-        group = session.group(id)
-        signnow_request = SignNowRequest(session=session, group=group)
-        if signnow_request.error_message:
-            raise HTTPRedirect(return_to + "?id={}&message={}", id,
-                               "We're having an issue fetching this document link. Please try again later!")
-        elif signnow_request.document:
-            if signnow_request.document.signed:
-                download_link = signnow_request.get_download_link()
-                if not signnow_request.error_message:
-                    raise HTTPRedirect(download_link)
-            raise HTTPRedirect(return_to + "?id={}&message={}", id,
-                               "We don't have a record of this document being signed.")
-        raise HTTPRedirect(return_to + "?id={}&message={}", id, "We don't have a record of a document for this group.")
 
     @requires_account()
     def register_group_member(self, session, group_id, message='', **params):

@@ -74,7 +74,7 @@
 {% if c.SIGNNOW_DEALER_TEMPLATE_ID and group.is_valid and group.status in c.DEALER_ACCEPTED_STATUSES %}
   {% if signnow_document and signnow_document.signed %}
   <span id="tc-link">
-    <a href="../preregistration/download_signnow_document?id={{ group.id }}" class="btn btn-info" role="button">
+    <a href="../services/download_signnow_document?id={{ group.id }}" class="btn btn-info" role="button">
       <i class="fa fa-download"></i> Terms and Conditions
     </a>
   </span>
@@ -84,7 +84,7 @@
     });
   </script>
   {% elif signnow_link %}
-  <div class="alert alert-danger pb-0" role="alert">
+  <div class="alert alert-warning pb-0" role="alert">
     <p>We need you to sign our terms and conditions for vending at {{ c.EVENT_NAME }}.</p>
     <p><a href="{{ signnow_link }}" class="btn btn-primary" target="_blank">
       Review and Sign
