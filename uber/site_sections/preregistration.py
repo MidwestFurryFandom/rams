@@ -2004,9 +2004,6 @@ class Root:
                             Please contact {email_only(c.REGDESK_EMAIL)} for assistance.")
         
         session.commit()
-        if c.ATTENDEE_ACCOUNTS_ENABLED and attendee.managers:
-            attendee.managers[0].set_account_owner()
-            session.commit()
 
         raise HTTPRedirect("homepage?&message={}", ' '.join(messages))
 
@@ -2065,10 +2062,6 @@ class Root:
         attendee.badge_status = c.REFUNDED_STATUS
         for shift in attendee.shifts:
             session.delete(shift)
-
-        if c.ATTENDEE_ACCOUNTS_ENABLED and attendee.managers:
-            attendee.managers[0].set_account_owner()
-            session.commit()
 
         raise HTTPRedirect('{}?message={}', page_redirect, success_message)
 
