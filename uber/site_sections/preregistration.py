@@ -1598,15 +1598,27 @@ class Root:
                            group.leader.id, message)
 
     @requires_account(Attendee)
-    def purchase_dealer_badge(self, session, id):
+    def purchase_dealer_badge(self, session, id, return_to='confirm'):
         from uber.site_sections.dealer_admin import convert_dealer_badge
         from uber.custom_tags import datetime_local_filter
+
         attendee = session.attendee(id)
+        if attendee.paid != c.PAID_BY_GROUP:
+            if attendee.amount_unpaid:
+                raise HTTPRedirect('new_badge_payment?id={}&return_to={}', attendee.id, return_to)
+
+            if return_to == 'group_members':
+                redirect_url_base = return_to + '?id=' + attendee.group.id + '&'
+            else:
+                redirect_url_base = 'confirm?id=' + id + '&' if not return_to or return_to == 'confirm' else return_to + (
+                    '?' if '?' not in return_to else '&')
+            raise HTTPRedirect(redirect_url_base + 'message={}', 'You have already purchased your badge.')
+
         convert_dealer_badge(session, attendee, f"Self-purchased dealer badge {datetime_local_filter(datetime.now())}.")
         session.add(attendee)
         session.commit()
 
-        raise HTTPRedirect(f'new_badge_payment?id={attendee.id}&return_to=confirm')
+        raise HTTPRedirect(f'new_badge_payment?id={attendee.id}&return_to={return_to}')
 
     @requires_account(Group)
     def dealer_signed_document(self, session, id):

@@ -97,9 +97,10 @@ class ArtistMarketplaceApplication(MagModel, table=True):
                 return Markup(f"Your registration is still pending as part of your {self.attendee.group.status_label} "
                         f"{c.DEALER_APP_TERM}. Please contact us at {email_to_link(email_only(c.MARKETPLACE_EMAIL))}.")
             return Markup(f"Your registration is still pending as part of your {self.attendee.group.status_label} "
-                          f"{c.DEALER_APP_TERM}. Please <a href='../preregistration/confirm?id={self.attendee.id}' "
-                          "target='_blank'>purchase your badge here</a> and return to this page to complete your "
-                          "artist marketplace application.")
+                          f"{c.DEALER_APP_TERM}. Please purchase your badge using the button below "
+                          "and return to this page to complete your artist marketplace application."
+                          f"</p><p><a href='../preregistration/purchase_dealer_badge?id={self.attendee.id}&"
+                          f"return_to=../marketplace/edit?id={self.id}' class='btn btn-success'>Purchase Badge</a>")
         elif not self.attendee.has_badge:
             return Markup("You cannot complete your marketplace application because your badge status is "
                           f"{self.attendee.badge_status_label}. Please contact us at {email_to_link(email_only(c.REGDESK_EMAIL))} "

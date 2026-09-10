@@ -62,7 +62,7 @@ class Root:
 
         signnow_last_emailed = None
         signnow_signed = False
-        if c.SIGNNOW_MARKETPLACE_TEMPLATE_ID and app.status == c.ACCEPTED or int(params.get('status', 0)) == c.ACCEPTED:
+        if c.SIGNNOW_MARKETPLACE_TEMPLATE_ID and (app.status == c.ACCEPTED or int(params.get('status', 0)) == c.ACCEPTED):
             if cherrypy.request.method == 'POST':
                 signnow_request = SignNowRequest(session=session, model=app,
                                                  ident="terms_and_conditions", create_if_none=True)
