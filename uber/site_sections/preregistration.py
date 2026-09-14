@@ -2601,7 +2601,7 @@ class Root:
                 raise HTTPRedirect(f'{page}This is not your account.')
 
         owner_id = params.get('owner_id', '')
-        if not owner_id:
+        if not owner_id and account.valid_adults:
             message = "Please select a registration to be the account owner."
         else:
             owner_attendee = session.get(Attendee, owner_id)
