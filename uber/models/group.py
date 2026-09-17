@@ -10,7 +10,7 @@ from sqlalchemy.types import DateTime, Uuid
 from typing import ClassVar
 
 from uber.config import c
-from uber.custom_tags import format_currency
+from uber.custom_tags import format_currency, email_only
 from uber.decorators import presave_adjustment
 from uber.models import MagModel
 from uber.models.types import (Choice, default_relationship as relationship, DefaultColumn as Column, MultiChoice, TakesPaymentMixin,
