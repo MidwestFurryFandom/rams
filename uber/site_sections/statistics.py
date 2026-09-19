@@ -11,6 +11,7 @@ from uber.config import c
 from uber.decorators import ajax, all_renderable, csv_file, not_site_mappable
 from uber.jinja import JinjaEnv
 from uber.models import Attendee, Group, PromoCode
+from uber.utils import date_trunc_day
 
 log = logging.getLogger(__name__)
 
@@ -45,16 +46,7 @@ class RegistrationDataOneYear:
 
     def query_current_year(self, session):
         self.event_name = c.EVENT_NAME_AND_YEAR
-
-        # TODO: we're hacking the timezone info out of ESCHATON (final day of event). probably not the right thing to do
-        self.end_date = c.DATES['ESCHATON'].replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
-
-        def date_trunc_day(*args, **kwargs):
-            # sqlite doesn't support date_trunc
-            if c.SQLALCHEMY_URL.startswith('sqlite'):
-                return func.date(*args, **kwargs)
-            else:
-                return func.date_trunc(literal('day'), *args, **kwargs)
+        self.end_date = c.DATES['ESCHATON'].replace(hour=0, minute=0, second=0, microsecond=0)
 
         # return registrations where people actually paid money
         # exclude: dealers

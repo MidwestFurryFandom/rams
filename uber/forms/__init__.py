@@ -506,7 +506,8 @@ class MagForm(Form):
                 try:
                     setattr(obj, name, field.data)
                 except (AttributeError, ValueError) as e:
-                    pass  # Indicates collision between a property name and a field name, like 'badges' for GroupInfo
+                    # Indicates collision between a property name and a field name, like 'badges' for GroupInfo
+                    setattr(obj, name + '_val', field.data)
             else:
                 try:
                     field.populate_obj(obj, name, is_admin=is_admin, dry_run=dry_run, session=session)

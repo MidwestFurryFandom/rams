@@ -416,6 +416,7 @@ class Root:
         if c.ATTENDEE_ACCOUNTS_ENABLED:
             attendee_account = session.current_attendee_account()
             session.add_attendee_to_account(attendee, attendee_account)
+            attendee_account.set_account_owner(attendee)
 
         if attendee.id in cherrypy.session.setdefault('imported_attendee_ids', {}):
             old_attendee = session.attendee(cherrypy.session['imported_attendee_ids'][attendee.id])
@@ -2600,7 +2601,7 @@ class Root:
                 raise HTTPRedirect(f'{page}This is not your account.')
 
         owner_id = params.get('owner_id', '')
-        if not owner_id:
+        if not owner_id and account.valid_adults:
             message = "Please select a registration to be the account owner."
         else:
             owner_attendee = session.get(Attendee, owner_id)
