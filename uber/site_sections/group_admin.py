@@ -191,7 +191,7 @@ class Root:
 
         signnow_last_emailed = None
         signnow_signed = False
-        if c.SIGNNOW_DEALER_TEMPLATE_ID and group.is_dealer and group.status in c.DEALER_ACCEPTED_STATUSES:
+        if group.is_dealer and c.SIGNNOW_DEALER_TEMPLATE_ID and group.is_valid and group.status in c.DEALER_ACCEPTED_STATUSES:
             if cherrypy.request.method == 'POST':
                 signnow_request = SignNowRequest(session=session, model=group,
                                                  ident="terms_and_conditions", create_if_none=True)
