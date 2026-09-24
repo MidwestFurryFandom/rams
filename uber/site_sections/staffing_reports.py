@@ -19,7 +19,7 @@ def volunteer_checklists(session):
         .filter(
             Attendee.staffing == True,  # noqa: E712
             Attendee.badge_status.in_([c.NEW_STATUS, c.COMPLETED_STATUS])).options(
-                selectinload(Attendee.hotel_requests), selectinload(Attendee.food_restrictions),
+                selectinload(Attendee.food_restrictions),
                 selectinload(Attendee.shifts)
             ) \
         .order_by(Attendee.full_name, Attendee.id).all()
@@ -184,7 +184,7 @@ class Root:
                     if not shift.job.restricted:
                         for dept in attendee.assigned_depts:
                             for minute in shift.job.minutes:
-                                if attendee.trusted_in(dept) and minute in untaken[dept]:
+                                if attendee.trusted_in(dept.id) and minute in untaken[dept]:
                                     overlapping[shift.job].update(untaken[dept][minute])
                 if overlapping:
                     flagged.append([attendee, sorted(overlapping.items(), key=lambda tup: tup[0].start_time)])

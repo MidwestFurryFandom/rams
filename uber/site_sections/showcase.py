@@ -2,6 +2,7 @@ import shutil
 
 import bcrypt
 import cherrypy
+import logging
 from cherrypy.lib.static import serve_file
 
 from uber.config import c
@@ -12,6 +13,8 @@ from uber.files import FileService
 from uber.forms import load_forms
 from uber.models import Attendee, File, Group, GuestGroup, IndieGameCode, IndieStudio, IndieDeveloper, IndieGame
 from uber.utils import add_opt, check, check_csrf, GuidebookUtils, validate_model
+
+log = logging.getLogger(__name__)
 
 
 @all_renderable(public=True)
@@ -279,8 +282,8 @@ class Root:
                             group.attendees.append(dev.matching_attendee)
                             if dev.leader:
                                 group.leader_id = dev.matching_attendee.id
-                                if c.ATTENDEE_ACCOUNTS_ENABLED and dev.managers and len(dev.managers) == 1:
-                                    leader_account = dev.managers[0]
+                                if c.ATTENDEE_ACCOUNTS_ENABLED and dev.matching_attendee.managers and len(dev.matching_attendee.managers) == 1:
+                                    leader_account = dev.matching_attendee.managers[0]
                         dev.matching_attendee.indie_developer = dev
                     else:
                         attendee = Attendee(
@@ -307,6 +310,10 @@ class Root:
                 group.cost = group.calc_default_cost()
                 group.guest = GuestGroup()
                 group.guest.group_type = c.MIVS
+                group.guest.hotel_included = False
+                for game in studio.games:
+                    if game.status == c.ACCEPTED and game.hotel_included:
+                        group.guest.hotel_included = True
                 raise HTTPRedirect('index?id={}&message={}', studio.id, 'Your studio has been registered!')
 
         return {
@@ -316,8 +323,8 @@ class Root:
     
     @get_studio_id(IndieGame)
     @requires_account(IndieStudio)
-    def show_info(self, session, message='', **params):
-        game = session.indie_game(params)
+    def show_info(self, session, id, message='', **params):
+        game = session.get(IndieGame, id)
         cherrypy.session['studio_id'] = game.studio.id
         image_form = load_forms({}, File(), ['MivsScreenshot'], field_prefix='new')
 
@@ -336,6 +343,7 @@ class Root:
             else:
                 game.studio.contact_phone = params.get('contact_phone', '')
 
+            game.apply(params, restricted=False)
             message = check(game)
 
             if not message:
@@ -387,8 +395,8 @@ class Root:
             'game_guidebook_thumbnail': FileService.get_existing_files(session, game, and_flags=['guidebook_thumbnail']),
         }
 
-    @file_to_fk_id('studio_id')
-    @requires_account(IndieStudio)
+    @file_to_fk_id('game_id')
+    @requires_account(IndieGame)
     @csrf_protected
     def mark_image(self, session, id, **params):
         image = FileService.from_db_id(session, id).file_obj
@@ -402,8 +410,8 @@ class Root:
         raise HTTPRedirect('show_info?id={}&message={}', game.id,
                            'Screenshot marked as one of your "best" images.')
 
-    @file_to_fk_id('studio_id')
-    @requires_account(IndieStudio)
+    @file_to_fk_id('game_id')
+    @requires_account(IndieGame)
     @csrf_protected
     def unmark_image(self, session, id, **params):
         image = FileService.from_db_id(session, id).file_obj

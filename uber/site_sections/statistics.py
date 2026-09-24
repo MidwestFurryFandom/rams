@@ -213,6 +213,7 @@ class Root:
 
         return {
             'counts': counts,
+            'extra_addon_counts': c.EXTRA_ADDON_STATS,
         }
 
     def badges_sold(self, session):

@@ -25,12 +25,12 @@ from sqlalchemy.event import listen
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from sqlalchemy.ext.hybrid import hybrid_method, hybrid_property
 from sqlalchemy.ext.mutable import MutableDict
-from sqlalchemy.orm import Query, joinedload, selectinload, subqueryload, contains_eager, declared_attr, sessionmaker, scoped_session
+from sqlalchemy.orm import Query, joinedload, lazyload, selectinload, subqueryload, contains_eager, declared_attr, sessionmaker, scoped_session
 import sqlalchemy.orm
 from sqlalchemy.orm.attributes import get_history, instance_state
 from sqlalchemy.orm.collections import InstrumentedList
 from sqlalchemy.schema import MetaData, UniqueConstraint
-from sqlalchemy.types import Boolean, Integer, Float, Date, Numeric, DateTime, Uuid, JSON
+from sqlalchemy.types import Boolean, Integer, Float, Date, Numeric, DateTime, Uuid, JSON, String, Text
 from sqlmodel import SQLModel
 
 import uber
@@ -75,7 +75,7 @@ engine = create_engine(
     c.SQLALCHEMY_URL,
     pool_size=c.SQLALCHEMY_POOL_SIZE,
     max_overflow=c.SQLALCHEMY_MAX_OVERFLOW,
-    pool_pre_ping=True,
+    pool_pre_ping=c.SQLALCHEMY_POOL_PRE_PING,
     pool_recycle=c.SQLALCHEMY_POOL_RECYCLE
 )
 
@@ -274,9 +274,11 @@ class MagModel(SQLModel):
         callbacks = []
         for name, attr in self._class_attrs.items():
             if hasattr(attr, '__call__') and hasattr(attr, label):
-                callbacks.append(getattr(self, name))
-        callbacks.sort(key=lambda f: getattr(f, label))
-        for function in callbacks:
+                # Use sort key from the class attr (which has the decorator attribute),
+                # not from the bound method (which may have been monkeypatched to a plain function).
+                callbacks.append((getattr(attr, label), getattr(self, name)))
+        callbacks.sort(key=lambda x: x[0])
+        for _, function in callbacks:
             function()
 
     def presave_adjustments(self):
@@ -623,6 +625,31 @@ class MagModel(SQLModel):
         if isinstance(value, six.string_types):
             value = value.strip()
 
+        def _is_string_like_column(col_type):
+            # Plain `isinstance(col_type, String)` misses SQLModel's
+            # `AutoString` (a TypeDecorator wrapping String) and any
+            # other TypeDecorator over String/Text. Walk the impl chain
+            # and also accept anything whose `python_type` is `str`.
+            from sqlalchemy.types import TypeDecorator
+            if isinstance(col_type, (String, Text)):
+                return True
+            seen = col_type
+            while isinstance(seen, TypeDecorator):
+                seen = getattr(seen, 'impl_instance', None) or getattr(seen, 'impl', None)
+                if seen is None:
+                    break
+                if isinstance(seen, type):
+                    # `.impl` can be the *class* rather than an instance.
+                    if issubclass(seen, (String, Text)):
+                        return True
+                    break
+                if isinstance(seen, (String, Text)):
+                    return True
+            try:
+                return col_type.python_type is str
+            except (AttributeError, NotImplementedError):
+                return False
+
         try:
             if value is None:
                 return  # Totally fine for value to be None
@@ -687,6 +714,20 @@ class MagModel(SQLModel):
                     return json.loads(value)
                 elif isinstance(value, (datetime, date)):
                     return value.isoformat()
+
+            elif isinstance(value, list) and _is_string_like_column(column.type):
+                # SelectMultipleField hands back a Python list. Plain
+                # String/Text columns (e.g. `LotteryApplication.
+                # hotel_preference`, stored as "comma-separated UUIDs")
+                # would otherwise get persisted via psycopg2's list
+                # adaptation as Postgres array text `{uuid1,uuid2}`,
+                # which then breaks on read when downstream code does
+                # `value.split(',')`. Join here so the on-disk shape
+                # matches the documented "comma-separated" contract.
+                # `_is_string_like_column` handles SQLModel's AutoString
+                # (a TypeDecorator that wraps String but doesn't subclass
+                # it, so plain `isinstance(..., String)` is False).
+                return ','.join(str(x).strip() for x in value if str(x).strip())
 
         except Exception as error:
             log.debug(
@@ -786,7 +827,7 @@ from uber.models.department import Job, Shift, Department, DeptRole  # noqa: E40
 from uber.models.email import Email  # noqa: E402
 from uber.models.group import Group  # noqa: E402
 from uber.models.guests import GuestGroup  # noqa: E402
-from uber.models.hotel import LotteryApplication
+from uber.models.hotel import LotteryApplication, LotteryHotel, LotteryRoomType
 from uber.models.mits import MITSApplicant, MITSTeam  # noqa: E402
 from uber.models.showcase import IndieJudge, IndieGame, IndieStudio  # noqa: E402
 from uber.models.panels import PanelApplication, PanelApplicant  # noqa: E402
@@ -797,12 +838,25 @@ class UberSession(sqlalchemy.orm.Session):
     engine = engine
     BaseClass = SQLModel
 
+    _checked_mixin_names = frozenset()
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for name, val in self.SessionMixin.__dict__.items():
-            if not name.startswith('__'):
-                assert not hasattr(self, name) and hasattr(val, '__call__')
-                setattr(self, name, MethodType(val, self))
+        # SessionMixin methods are bound lazily in __getattr__
+        mixin_names = frozenset(name for name in self.SessionMixin.__dict__ if not name.startswith('__'))
+        if mixin_names != UberSession._checked_mixin_names:
+            for name in mixin_names:
+                assert not hasattr(sqlalchemy.orm.Session, name) and name not in UberSession.__dict__ \
+                    and hasattr(self.SessionMixin.__dict__[name], '__call__'), name
+            UberSession._checked_mixin_names = mixin_names
+
+    def __getattr__(self, name):
+        val = self.SessionMixin.__dict__.get(name) if not name.startswith('__') else None
+        if val is None or not hasattr(val, '__call__'):
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        method = MethodType(val, self)
+        self.__dict__[name] = method
+        return method
 
     class QuerySubclass(Query):
         @property
@@ -893,11 +947,17 @@ class UberSession(sqlalchemy.orm.Session):
         def current_attendee_account(self):
             if c.ATTENDEE_ACCOUNTS_ENABLED and getattr(cherrypy, 'session', {}).get('attendee_account_id', getattr(cherrypy.request, 'attendee_account', None)):
                 account_id = cherrypy.session.get('attendee_account_id', getattr(cherrypy.request, 'attendee_account', None))
+                # Handlers ask for this several times per request; reuse the copy already in this session
+                cached = self.info.get('current_attendee_account')
+                if cached is not None and str(cached.id) == str(account_id) and cached in self:
+                    return cached
+
                 account = self.query(AttendeeAccount).filter(AttendeeAccount.id == account_id).options(selectinload(AttendeeAccount.attendees)).first()
 
                 if not account:
                     cherrypy.session['attendee_account_id'] = ''
                 else:
+                    self.info['current_attendee_account'] = account
                     return account
 
         def get_attendee_account_by_attendee(self, attendee):
@@ -910,10 +970,10 @@ class UberSession(sqlalchemy.orm.Session):
                 return logged_in_account
             elif len(attendee.managers) == 1:
                 return attendee.managers[0]
-            
+
         def volunteer_from_id(self, id):
             return self.get(Attendee, id, options=[
-                selectinload(Attendee.hotel_requests), selectinload(Attendee.food_restrictions),
+                selectinload(Attendee.food_restrictions),
                 selectinload(Attendee.shifts)
             ])
 
@@ -927,8 +987,7 @@ class UberSession(sqlalchemy.orm.Session):
             return set(staffer.assigned_depts_ids).intersection(dept_ids_with_inherent_role)
 
         def admin_can_see_guest_group(self, guest):
-            return guest.group_type_label.upper().replace(' ', '_') \
-                in self.current_admin_account().viewable_guest_group_types
+            return guest.group_type in self.current_admin_account().viewable_guest_group_types
 
         def admin_attendee_max_access(self, attendee, read_only=True):
             admin = self.current_admin_account()
@@ -957,7 +1016,7 @@ class UberSession(sqlalchemy.orm.Session):
                                                    read_only=read_only) for section in group.access_sections])
 
         def viewable_groups(self):
-            from uber.models import Group, GuestGroup
+            from uber.models import Group, GuestGroup, DeptMembership
             admin = self.current_admin_account()
 
             if admin.full_registration_admin:
@@ -972,12 +1031,12 @@ class UberSession(sqlalchemy.orm.Session):
             if 'guest_admin' in admin.read_or_write_access_set:
                 subqueries.append(self.query(Group).join(
                     GuestGroup, Group.id == GuestGroup.group_id).filter(
-                        ~GuestGroup.group_type.in_([c.BAND, c.SIDE_STAGE, c.MIVS])))
+                        GuestGroup.group_type.in_(AdminAccount.checklist_access_matrix['guest_admin'])))
 
             if 'band_admin' in admin.read_or_write_access_set:
                 subqueries.append(self.query(Group).join(
                     GuestGroup, Group.id == GuestGroup.group_id).filter(
-                        GuestGroup.group_type.in_([c.BAND, c.ROCK_ISLAND, c.SIDE_STAGE])))
+                        GuestGroup.group_type.in_(AdminAccount.checklist_access_matrix['band_admin'])))
                 subqueries.append(self.query(Group).join(Group.leader).filter(
                     Attendee.ribbon.contains(c.BAND)))
 
@@ -987,7 +1046,7 @@ class UberSession(sqlalchemy.orm.Session):
             if 'showcase_admin' in admin.read_or_write_access_set:
                 subqueries.append(self.query(Group).join(
                     GuestGroup, Group.id == GuestGroup.group_id).filter(
-                        GuestGroup.group_type == c.MIVS))
+                        GuestGroup.group_type.in_(AdminAccount.checklist_access_matrix['showcase_admin'])))
                 subqueries.append(self.query(Group).join(Group.leader).filter(
                     Attendee.ribbon.contains(c.MIVS)))
 
@@ -998,9 +1057,9 @@ class UberSession(sqlalchemy.orm.Session):
                 if admin.full_shifts_admin:
                     subqueries.append(staff_groups)
                 else:
-                    for dept_membership in admin.attendee.dept_memberships_with_inherent_role:
-                        subqueries.append(staff_groups.filter(
-                            Attendee.dept_memberships.any(department_id=dept_membership.department_id)))
+                    dept_ids = [membership.department_id for membership in admin.attendee.dept_memberships_with_inherent_role]
+                    subqueries.append(staff_groups.filter(
+                        Attendee.dept_memberships.any(DeptMembership.department_id.in_(dept_ids))))
 
             return subqueries[0].union(*subqueries[1:])
 
@@ -1020,7 +1079,7 @@ class UberSession(sqlalchemy.orm.Session):
                             Attendee.group_id != None,
                             Group.id == Attendee.group_id,
                             GuestGroup.group_id == Group.id,
-                            GuestGroup.group_type.in_([c.BAND, c.ROCK_ISLAND, c.SIDE_STAGE]))))
+                            GuestGroup.group_type.in_(AdminAccount.checklist_access_matrix['band_admin']))))
             
             return_dict['guest_admin'] = self.query(Attendee).outerjoin(Group, Attendee.group_id == Group.id).join(
                 GuestGroup, Group.id == GuestGroup.group_id).filter(
@@ -1030,7 +1089,7 @@ class UberSession(sqlalchemy.orm.Session):
                             Attendee.group_id != None,
                             Group.id == Attendee.group_id,
                             GuestGroup.group_id == Group.id,
-                            ~GuestGroup.group_type.in_([c.BAND, c.SIDE_STAGE, c.MIVS]))))
+                            GuestGroup.group_type.in_(AdminAccount.checklist_access_matrix['guest_admin']))))
 
             return_dict['panels_admin'] = self.query(Attendee).outerjoin(PanelApplicant).filter(
                                                  or_(Attendee.ribbon.contains(c.PANELIST_RIBBON),
@@ -1049,7 +1108,7 @@ class UberSession(sqlalchemy.orm.Session):
                             Attendee.group_id != None,
                             Group.id == Attendee.group_id,
                             GuestGroup.group_id == Group.id,
-                            GuestGroup.group_type == c.MIVS)))
+                            GuestGroup.group_type.in_(AdminAccount.checklist_access_matrix['showcase_admin']))))
             return_dict['art_show_admin'] = self.query(Attendee
                                                        ).outerjoin(
                                                            ArtShowApplication,
@@ -1103,7 +1162,7 @@ class UberSession(sqlalchemy.orm.Session):
             if department:
                 return {
                     'conf': conf,
-                    'relevant': attendee.can_admin_checklist_for(department),
+                    'relevant': attendee.can_admin_checklist_for(department.id),
                     'completed': department.checklist_item_for_slug(conf.slug)
                 }
             else:
@@ -1209,18 +1268,17 @@ class UberSession(sqlalchemy.orm.Session):
                 Attendee.is_valid == True  # noqa: E712
             )
 
-            if attendees:
-                statuses = defaultdict(lambda: six.MAXSIZE, {
-                    c.COMPLETED_STATUS: 0,
-                    c.NEW_STATUS: 1,
-                    c.REFUNDED_STATUS: 2,
-                    c.DEFERRED_STATUS: 3,
-                    c.WATCHED_STATUS: 4,
-                    c.UNAPPROVED_DEALER_STATUS: 5,
-                    c.NOT_ATTENDING: 6})
+            statuses = defaultdict(lambda: six.MAXSIZE, {
+                c.COMPLETED_STATUS: 0,
+                c.NEW_STATUS: 1,
+                c.REFUNDED_STATUS: 2,
+                c.DEFERRED_STATUS: 3,
+                c.WATCHED_STATUS: 4,
+                c.UNAPPROVED_DEALER_STATUS: 5,
+                c.NOT_ATTENDING: 6})
 
-                attendees = sorted(
-                    attendees, key=lambda a: statuses[a.badge_status])
+            attendees = sorted(attendees, key=lambda a: statuses[a.badge_status])
+            if attendees:
                 return attendees[0]
 
             raise ValueError('Attendee not found')
@@ -1279,7 +1337,7 @@ class UberSession(sqlalchemy.orm.Session):
         def add_attendee_to_account(self, attendee, account):
             unclaimed_account = account.hashed != '' and not account.is_sso_account
 
-            if attendee.admin_account and attendee.admin_account.sso_id and attendee.admin_account.sso_id != account.sso_id:
+            if account.sso_id and attendee.admin_account and attendee.admin_account.sso_id and attendee.admin_account.sso_id != account.sso_id:
                 log.error(f"Tried to add attendee {attendee.full_name} to account {account.email}, but their admin account has already been claimed.")
                 return
 
@@ -1530,10 +1588,9 @@ class UberSession(sqlalchemy.orm.Session):
             unambiguous_code = RegistrationCode.disambiguate_code(code)
             clause = or_(model.normalized_code == normalized_code, model.normalized_code == unambiguous_code)
 
-            # Make sure that code is a valid Uuid(as_uuid=False) before adding
-            # PromoCode.id to the filter clause
+            # Make sure that code is a valid UUID before adding PromoCode.id to the filter clause
             try:
-                promo_code_id = uuid.UUID(as_uuid=False)(normalized_code).hex
+                promo_code_id = uuid.UUID(normalized_code).hex
             except Exception:
                 pass
             else:
@@ -1666,11 +1723,10 @@ class UberSession(sqlalchemy.orm.Session):
             """
             lower_bound, upper_bound = c.BADGE_RANGES[badge_type]
 
-            return self.query(BadgeInfo).filter(BadgeInfo.attendee_id == None,
-                                                BadgeInfo.ident >= lower_bound,
-                                                BadgeInfo.ident <= upper_bound
-                                                ).order_by(BadgeInfo.attendee_id).order_by(
-                                                    BadgeInfo.ident).limit(1).first()
+            return self.query(BadgeInfo).options(lazyload(BadgeInfo.attendee)).filter(
+                BadgeInfo.attendee_id == None,  # noqa: E711
+                BadgeInfo.ident >= lower_bound,
+                BadgeInfo.ident <= upper_bound).order_by(BadgeInfo.ident).limit(1).first()
 
         def update_badge(self, attendee):
             """
@@ -1757,8 +1813,7 @@ class UberSession(sqlalchemy.orm.Session):
                 .options(
                     subqueryload(Attendee.dept_memberships),
                     subqueryload(Attendee.group),
-                    subqueryload(Attendee.shifts).subqueryload(Shift.job).subqueryload(Job.department),
-                    subqueryload(Attendee.room_assignments)) \
+                    subqueryload(Attendee.shifts).subqueryload(Shift.job).subqueryload(Job.department)) \
                 .order_by(Attendee.full_name, Attendee.id)
 
         def staffers(self, pending=False):
@@ -2359,6 +2414,7 @@ _ScopedSession.engine = engine
 _ScopedSession.BaseClass = SQLModel
 _ScopedSession.SessionMixin = UberSession.SessionMixin
 _ScopedSession.session_factory = SessionFactory
+_ScopedSession.QuerySubclass = UberSession.QuerySubclass
 
 class HybridSessionProxy:
     """
@@ -2386,6 +2442,7 @@ def initialize_db():
         if not hasattr(Session.SessionMixin, model.__tablename__):
             setattr(Session.SessionMixin, model.__tablename__, _make_getter(model))
 cherrypy.engine.subscribe('start', initialize_db, priority=97)
+
 
 def _attendee_validity_check():
     orig_getter = Session.SessionMixin.attendee

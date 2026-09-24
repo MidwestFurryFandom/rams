@@ -1,5 +1,9 @@
 {% import 'macros.html' as macros with context %}
 {% import 'forms/macros.html' as form_macros with context %}
+{# Imported here rather than in suite_lottery.html too: a child template's
+   blocks can see the parent's top-level imports (the same way they already
+   see `form_macros` and `steps`). #}
+{% import 'forms/hotel/_steps.html' as step_macros with context %}
 {% set room_lottery = room_lottery or forms['room_lottery'] %}
 {% set suite_lottery = suite_lottery or forms['suite_lottery'] %}
 {% set room_or_suite_lottery = suite_lottery if 'suite_lottery' in forms else room_lottery %}
@@ -49,18 +53,41 @@ Due to the extra scaffolding involved on this form, each block also has a _desc 
         text-align: center;
     }
     .placeholder-deselect-opt::after {
-        content: "Drag an item here to deselect it.";
+        content: "Click the red - on an item to deselect it, or drag it here.";
     }
     .placeholder-select-opt::after {
-        content: "Drag an item here to select it.";
+        content: "Click the green + on an item to select it, or drag it here.";
+    }
+    /* Applied to the li, not its h4, because sortLists rewrites h4 classes. */
+    .ranking-unavailable {
+        opacity: 0.55;
+    }
+    .ranking-unavailable .card-title::after {
+        content: " (not at your selected hotels)";
+        font-style: italic;
+        font-size: 0.8rem;
     }
 </style>
+<script type="text/javascript">
+  window.hotelAvailabilityConfig = {{ availability_config|tojson }};
+</script>
+{{ "js/hotel-lottery-availability.js"|serve_static_content }}
 {% endif %}
 {% endblock %}
 
 {% block form_js %}
 {% if not read_only %}
 <script type="text/javascript">
+    // Both the page-load pass and goToNextStep mark steps complete, and an
+    // entrant can re-save a step they already finished, so this has to be
+    // idempotent or the header collects a check per save.
+    var markStepComplete = function(step) {
+        var $button = $('#step-' + step + '-button');
+        if (!$button.find('.fa-check').length) {
+            $button.append("&nbsp;<i class='fa fa-check'></i>");
+        }
+    };
+
     var goToNextStep = function(response) {
         let step = 0;
         if (response.step_completed != '') {
@@ -79,7 +106,7 @@ Due to the extra scaffolding involved on this form, each block also has a _desc 
             $('#step-' + step).collapse('hide');
             $('#step-' + step + '-submit').hide();
             $('#step-' + step + '-save-reminder').collapse('show');
-            $('#step-' + step + '-button').html($('#step-' + step + '-button').html() + "&nbsp;<i class='fa fa-check'></i>");
+            markStepComplete(step);
             $('#step-' + next_step + '-button').prop('disabled', false);
             $('#step-' + next_step).collapse('show');
             $('#form-validations-{{ room_text }}-lottery-form').detach().prependTo($('#step-' + next_step).find('.accordion-body'));
@@ -93,7 +120,8 @@ Due to the extra scaffolding involved on this form, each block also has a _desc 
         $('#step-1').collapse('hide');
         current_step = parseInt("{{ application.current_step }}");
         for (let step = 1; step <= current_step; step++) {
-            $('#step-' + step + '-button').prop('disabled', false).html($('#step-' + step + '-button').html() + "&nbsp;<i class='fa fa-check'></i>");
+            $('#step-' + step + '-button').prop('disabled', false);
+            markStepComplete(step);
             $('#step-' + step + '-submit').hide();
             $('#step-' + step + '-save-reminder').collapse('show');
         }
@@ -122,6 +150,10 @@ Due to the extra scaffolding involved on this form, each block also has a _desc 
 {% endif %}
 {% endblock %}
 
+{# Tracks whether the room_pricing block rendered at its normal spot, so a
+   plugin override of check_in_out_dates_form cannot silently drop it. #}
+{% set pricing_slot = namespace(rendered=false) %}
+
 <div x-data="{ {% block x_data %}
 wants_ada: {{ room_or_suite_lottery.wants_ada.data|tojson }},
 {% endblock %} }">
@@ -132,11 +164,7 @@ wants_ada: {{ room_or_suite_lottery.wants_ada.data|tojson }},
 {% if 'room_dates' in c.HOTEL_LOTTERY_FORM_STEPS or 'suite_dates' in c.HOTEL_LOTTERY_FORM_STEPS %}
 {% set room_requirements = app_or_parent.suite_requirements_str if 'suite_lottery' in forms else app_or_parent.room_requirements_str %}
 <div class="accordion-item">
-    <h3 class="accordion-header" id="step-{{ steps.counter }}-header">
-        <button class="accordion-button{% if steps.counter != 1 %} collapsed{% endif %}" disabled type="button" id="step-{{ steps.counter }}-button" data-bs-toggle="collapse" data-bs-target="#step-{{ steps.counter }}" aria-expanded="true" aria-controls="step-{{ steps.counter }}">
-            Step {{ steps.counter }}: Check-In and Check-Out Dates
-        </button>
-    </h3>
+    {{ step_macros.step_header(steps.counter, 'Check-In and Check-Out Dates') }}
     <div id="step-{{ steps.counter }}" class="accordion-collapse collapse{% if steps.counter == 1 %} show{% endif %}" aria-labelledby="step-{{ steps.counter }}-header">
         <div class="accordion-body">
             {% block check_in_out_dates_desc %}
@@ -174,19 +202,96 @@ wants_ada: {{ room_or_suite_lottery.wants_ada.data|tojson }},
             </div>
             {% endif %}
 
-            {% if not read_only and application.current_step <= steps.counter %}
-            <div class="row justify-content-end">
-                <div class="col col-auto">
-                    <button type="submit" id="step-{{ steps.counter }}-submit" class="btn btn-primary" name="current_step" value="{{ steps.counter }}">Save and Continue</button>
+            {% set pricing_slot.rendered = true %}
+            {% block room_pricing %}
+            {% if not read_only and pricing_config and pricing_config.hotels %}
+            <script type="text/javascript">
+              window.hotelPricingConfig = {{ pricing_config|tojson }};
+            </script>
+            {{ "js/hotel-lottery-pricing.js"|serve_static_content }}
+            <hr/>
+            <div class="mb-3" x-data="hotelPricing()">
+              <h5>Room Pricing</h5>
+              <p class="form-text">
+                There are two sets of room pricing below. Rates are not guaranteed until a room is awarded and booked.
+              </p>
+
+              <div class="row g-3 mb-3">
+                <div class="col-sm-4">
+                  <label class="form-label" for="pricing-occupancy">How many people will stay in your room?</label>
+                  <select class="form-select" id="pricing-occupancy" x-model.number="occupancy">
+                    <template x-for="n in occupancyOptions()" :key="n">
+                      <option :value="n" x-text="n + (n === 1 ? ' person' : ' people')"></option>
+                    </template>
+                  </select>
+                  <div class="form-text">
+                    This only changes the prices shown to you. It is <strong>not saved</strong> and has
+                    no effect on your lottery entry or the room you may be awarded.
+                  </div>
                 </div>
-            </div>
-            {% endif %}
-            {% if not read_only and application.status != c.COMPLETE %}
-            <div class="collapse text-end" id="step-{{ steps.counter }}-save-reminder">
-                <em>Scroll down to your current step and click "Save and Continue" to save changes.</em>
+              </div>
+
+              <template x-if="!hasDates()">
+                <p class="form-text fst-italic">Choose your preferred dates above to see totals.</p>
+              </template>
+
+              <template x-if="hasDates()">
+                <div>
+                  <p class="form-text">This information lets you see the applicable rate at a hotel based on your planned number of occupants 
+                     multiplied by the number of days you have selected above.</p>
+                  <p class="form-text"
+                     x-text="nightCount() + (nightCount() === 1 ? ' night' : ' nights') + ' selected.'"></p>
+                  <ul class="list-group mb-2">
+                    <template x-for="hotel in config.hotels" :key="hotel.id">
+                      <li class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start gap-3">
+                          <div>
+                            <strong x-text="hotel.name"></strong>
+                            <template x-for="block in hotel.blocks" :key="block.id">
+                              <div class="small text-muted">
+                                <span x-text="block.type_name"></span>:
+                                <span x-text="blockTotalText(block)"></span>
+                                <template x-if="block.notes">
+                                  <span class="fst-italic" x-text="' (' + block.notes + ')'"></span>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                          <div class="text-end text-nowrap">
+                            <span class="badge bg-secondary" x-text="hotelRangeText(hotel)"></span>
+                          </div>
+                        </div>
+                      </li>
+                    </template>
+                  </ul>
+
+                  <div class="accordion" id="pricing-accordion">
+                    <p class="form-text">Below is the per-night cost for each room type at each hotel, based on the number of 
+                       people in the room. Click a hotel name to see its rates.</p>
+                    <template x-for="hotel in config.hotels" :key="hotel.id">
+                      <div class="accordion-item">
+                        <h2 class="accordion-header">
+                          <button class="accordion-button collapsed" type="button"
+                                  data-bs-toggle="collapse"
+                                  :data-bs-target="'#pricing-panel-' + hotel.id"
+                                  x-text="'All ' + hotel.name + ' rates'"></button>
+                        </h2>
+                        <div class="accordion-collapse collapse" :id="'pricing-panel-' + hotel.id"
+                             data-bs-parent="#pricing-accordion">
+                          <div class="accordion-body p-2" x-html="rateTable(hotel)"></div>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
             </div>
             {% endif %}
             {% endblock %}
+
+            {{ step_macros.step_footer(steps.counter) }}
+            {% endblock %}
+            {% if not pricing_slot.rendered %}{{ self.room_pricing() }}{% endif %}
         </div>
     </div>
 </div>
@@ -196,11 +301,7 @@ wants_ada: {{ room_or_suite_lottery.wants_ada.data|tojson }},
 
 {% block ada_info %}
 <div class="accordion-item">
-    <h3 class="accordion-header" id="step-{{ steps.counter }}-header">
-        <button class="accordion-button{% if steps.counter != 1 %} collapsed{% endif %}" disabled type="button" id="step-{{ steps.counter }}-button" data-bs-toggle="collapse" data-bs-target="#step-{{ steps.counter }}" aria-expanded="true" aria-controls="step-{{ steps.counter }}">
-            Step {{ steps.counter }}: ADA Room Information
-        </button>
-    </h3>
+    {{ step_macros.step_header(steps.counter, 'ADA Room Information') }}
     <div id="step-{{ steps.counter }}" class="accordion-collapse collapse{% if steps.counter == 1 %} show{% endif %}" aria-labelledby="step-{{ steps.counter }}-header">
         <div class="accordion-body">
         {% block ada_info_desc %}
@@ -234,18 +335,7 @@ wants_ada: {{ room_or_suite_lottery.wants_ada.data|tojson }},
             {% endif %}
         </div>
 
-        {% if not read_only and application.current_step <= steps.counter %}
-            <div class="row justify-content-end">
-                <div class="col col-auto">
-                    <button type="submit" id="step-{{ steps.counter }}-submit" class="btn btn-primary" name="current_step" value="{{ steps.counter }}">Save and Continue</button>
-                </div>
-            </div>
-        {% endif %}
-        {% if not read_only and application.status != c.COMPLETE %}
-            <div class="collapse text-end" id="step-{{ steps.counter }}-save-reminder">
-                <em>Scroll down to your current step and click "Save and Continue" to save changes.</em>
-            </div>
-        {% endif %}
+        {{ step_macros.step_footer(steps.counter) }}
         {% endblock %}
         </div>
     </div>
@@ -257,11 +347,9 @@ wants_ada: {{ room_or_suite_lottery.wants_ada.data|tojson }},
 
 {% block hotel_and_room_type_ranking %}
 <div class="accordion-item">
-    <h3 class="accordion-header" id="step-{{ steps.counter }}-header">
-        <button class="accordion-button{% if steps.counter != 1 %} collapsed{% endif %}" disabled type="button" id="step-{{ steps.counter }}-button" data-bs-toggle="collapse" data-bs-target="#step-{{ steps.counter }}" aria-expanded="true" aria-controls="step-{{ steps.counter }}">
-            Step {{ steps.counter }}: Hotel and Room Type Preference{% if 'suite_lottery' in forms %} for Standard Room Lottery{% endif %}
-        </button>
-    </h3>
+    {% call step_macros.step_header(steps.counter) %}
+      Hotel and Room Type Preference{% if 'suite_lottery' in forms %} for Standard Room Lottery{% endif %}
+    {% endcall %}
     <div id="step-{{ steps.counter }}" class="accordion-collapse collapse{% if steps.counter == 1 %} show{% endif %}" aria-labelledby="step-{{ steps.counter }}-header">
         <div class="accordion-body">
             {% block room_opt_out %}{% endblock %}
@@ -276,23 +364,22 @@ wants_ada: {{ room_or_suite_lottery.wants_ada.data|tojson }},
 
             {% block hotel_and_room_type_ranking_form %}
             <div class="hotel_and_room_type_ranking">
-            {% if c.HOTEL_LOTTERY_HOTELS_OPTS %}
+            {% if not read_only and pricing_config and pricing_config.hotels %}
+            <div class="form-text mb-2">
+              Prices below are the total for your selected dates and number of occupants,
+              before taxes and fees. They update as you change those on the dates step.
+            </div>
+            {% endif %}
+            {% if room_or_suite_lottery.hotel_preference.choices|length > 1 %}
             {{ form_macros.input(room_or_suite_lottery.hotel_preference) }}
             {% endif %}
             {{ form_macros.input(room_or_suite_lottery.room_type_preference) }}
+            {# Advisory only. Deliberately not the field's own
+               #<id>-validation div, which the AJAX validator clears on
+               every round trip. #}
+            <div class="form-text text-warning" id="room_type_preference-availability-warning"></div>
             </div>
-            {% if not read_only and application.current_step <= steps.counter %}
-            <div class="row justify-content-end">
-                <div class="col col-auto">
-                    <button type="submit" id="step-{{ steps.counter }}-submit" class="btn btn-primary" name="current_step" value="{{ steps.counter }}">Save and Continue</button>
-                </div>
-            </div>
-            {% endif %}
-            {% if not read_only and application.status != c.COMPLETE %}
-            <div class="collapse text-end" id="step-{{ steps.counter }}-save-reminder">
-                <em>Scroll down to your current step and click "Save and Continue" to save changes.</em>
-            </div>
-            {% endif %}
+            {{ step_macros.step_footer(steps.counter) }}
             {% endblock %}
         </div>
     </div>
@@ -301,38 +388,26 @@ wants_ada: {{ room_or_suite_lottery.wants_ada.data|tojson }},
 {% endblock %}
 
 {% block priorities %}
-{% if 'room_selection_pref' in c.HOTEL_LOTTERY_FORM_STEPS or 'suite_selection_pref' in c.HOTEL_LOTTERY_FORM_STEPS %}
+{# c.HOTEL_LOTTERY_FORM_STEPS already drops selection_pref when the
+   priorities feature is off or fewer than two options are configured,
+   so membership is the single gate - keeping the rendered accordion in
+   sync with the step numbers the JS and validations use. #}
+{% if (room_text ~ '_selection_pref') in c.HOTEL_LOTTERY_FORM_STEPS %}
 <div class="accordion-item">
-    <h3 class="accordion-header" id="step-{{ steps.counter }}-header">
-        <button class="accordion-button{% if steps.counter != 1 %} collapsed{% endif %}" disabled type="button" id="step-{{ steps.counter }}-button" data-bs-toggle="collapse" data-bs-target="#step-{{ steps.counter }}" aria-expanded="true" aria-controls="step-{{ steps.counter }}">
-            Step {{ steps.counter }}: Ranking Preference Priorities
-        </button>
-    </h3>
+    {{ step_macros.step_header(steps.counter, 'Selection Priorities') }}
     <div id="step-{{ steps.counter }}" class="accordion-collapse collapse{% if steps.counter == 1 %} show{% endif %}" aria-labelledby="step-{{ steps.counter }}-header">
         <div class="accordion-body">
             {% block priorities_desc %}
-            <p>
-                Rank the options below from top to bottom to determine how we'll prioritize your ranked choices and preferred dates.
-                This ranking only applies if your entry has multiple options for a given category, as we can only work within the options that you specify as acceptable.
+            <p class="priorities">
+                Rank what matters most to you if we can't grant every preference, by dragging options from "Available" to "Selected" in order of importance.
             </p>
-            <p>We ask that you rank all priorities even if you haven't selected multiple options for all categories{% if 'suite_lottery' in forms %} or if you are opting out of a standard room entry{% endif %}, in case you come back and change your entry later.</p>
-            {% include 'hotel_lottery/priorities_example.html' with context %}
             {% endblock %}
-            {% block priorities_form %}
-            {{ form_macros.input(room_or_suite_lottery.selection_priorities) }}
 
-            {% if not read_only and application.current_step <= steps.counter %}
-            <div class="row justify-content-end">
-                <div class="col col-auto">
-                    <button type="submit" id="step-{{ steps.counter }}-submit" class="btn btn-primary" name="current_step" value="{{ steps.counter }}">Save and Continue{% if suite %} to Suite Lottery{% endif %}</button>
-                </div>
+            {% block priorities_form %}
+            <div class="priorities">
+            {{ form_macros.input(room_or_suite_lottery.selection_priorities) }}
             </div>
-            {% endif %}
-            {% if not read_only and application.status != c.COMPLETE %}
-            <div class="collapse text-end" id="step-{{ steps.counter }}-save-reminder">
-                <em>Scroll down to your current step and click "Save and Continue" to save changes.</em>
-            </div>
-            {% endif %}
+            {{ step_macros.step_footer(steps.counter) }}
             {% endblock %}
         </div>
     </div>

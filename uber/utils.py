@@ -271,6 +271,39 @@ def create_valid_user_supplied_redirect_url(url, default_url):
     return url
 
 
+def redirect_with_params(base, **params):
+    """Build a redirect URL with each query value individually URL-quoted,
+    for passing to HTTPRedirect as a single pre-formatted string.
+
+    The HTTPRedirect footgun, documented once here: HTTPRedirect quotes
+    each ``{}`` substitution *as a whole*, so passing a pre-built
+    ``id=X&attendee_id=Y`` (or a full URL) as one substitution emits
+    ``id%3DX%26attendee_id%3DY`` - the ``?``/``&``/``=`` get
+    percent-encoded and CherryPy parses a single garbled query param.
+    The fix is to build the final URL ourselves, quoting only the
+    values, and raise ``HTTPRedirect(redirect_with_params(...))`` with
+    no further substitution.
+
+    Details:
+      * ``base`` may already contain a query string; params are appended
+        with ``&`` in that case.
+      * Params with empty/None values are skipped entirely.
+      * Params appear in keyword order - callers conventionally put
+        ``message`` last.
+      * Any stray ``{``/``}`` (e.g. from a malformed client-supplied
+        return URL) are doubled so HTTPRedirect's str.format pass
+        leaves them intact instead of blowing up.
+    """
+    from urllib.parse import quote
+    parts = ['{}={}'.format(name, quote(str(value)))
+             for name, value in params.items()
+             if value is not None and value != '']
+    url = base
+    if parts:
+        url += ('&' if '?' in base else '?') + '&'.join(parts)
+    return url.replace('{', '{{').replace('}', '}}')
+
+
 def normalize_phone(phone_number, country='US'):
     return phonenumbers.format_number(
         phonenumbers.parse(phone_number, country),
@@ -707,11 +740,11 @@ def get_age_from_birthday(birthdate, today=None):
 
     birthdate_col = Attendee.__table__.columns.get('birthdate')
 
-    if isinstance(birthdate, six.string_types):        
-        birthdate = Attendee().coerce_column_data(birthdate_col, birthdate)
+    if isinstance(birthdate, six.string_types):
+        birthdate = Attendee.coerce_column_data(Attendee, birthdate_col, birthdate)
 
     if isinstance(today, six.string_types):
-        today = Attendee().coerce_column_data(birthdate_col, today)
+        today = Attendee.coerce_column_data(Attendee, birthdate_col, today)
 
     # int(True) == 1 and int(False) == 0
     upcoming_birthday = int(
@@ -2102,6 +2135,7 @@ class TaskUtils:
 
     @staticmethod
     def attendee_import(import_job):
+        from uber.badge_funcs import needs_badge_num
         from uber.models import Attendee, AttendeeAccount, DeptMembership, DeptRole
         from functools import partial
 
@@ -2115,6 +2149,7 @@ class TaskUtils:
             errors = []
             badge_type = int(import_job.json_data.get('badge_type', c.ATTENDEE_BADGE))
             badge_status = int(import_job.json_data.get('badge_status', c.NEW_STATUS))
+            paid_status = int(import_job.json_data.get('paid', c.NOT_PAID))
             extra_admin_notes = import_job.json_data.get('admin_notes', '')
 
             if badge_type not in c.BADGES:
@@ -2137,11 +2172,7 @@ class TaskUtils:
 
             attendee = results.get('attendees', [])[0]
             badge_label = c.BADGES[badge_type].lower()
-
-            if badge_type == c.STAFF_BADGE:
-                paid = c.NEED_NOT_PAY
-            else:
-                paid = c.NOT_PAID
+            old_badge_num = attendee['badge_num']
 
             import_from_url = '{}/registration/form?id={}\n\n'.format(import_job.target_server, attendee['id'])
             new_admin_notes = '{}\n\n'.format(extra_admin_notes) if extra_admin_notes else ''
@@ -2151,7 +2182,7 @@ class TaskUtils:
             attendee.update({
                 'badge_type': badge_type,
                 'badge_status': badge_status,
-                'paid': paid,
+                'paid': c.NEED_NOT_PAY if badge_type in [c.STAFF_BADGE, c.GUEST_BADGE] else paid_status,
                 'placeholder': True,
                 'admin_notes': 'Imported {} from {}{}{}'.format(
                     badge_label, import_from_url, new_admin_notes, old_admin_notes),
@@ -2179,6 +2210,8 @@ class TaskUtils:
 
                 attendee.update({
                     'staffing': True,
+                    'imported_staff': True,
+                    'badge_num': old_badge_num,
                     'ribbon': str(c.DEPT_HEAD_RIBBON) if dept_head_depts else '',
                 })
 
@@ -2197,6 +2230,9 @@ class TaskUtils:
                         if role:
                             dept_membership.dept_roles.append(role)
                     attendee.dept_memberships.append(dept_membership)
+
+            if needs_badge_num(attendee) and not attendee.badge_num:
+                session.update_badge(attendee)
 
             session.add(attendee)
 
@@ -2325,22 +2361,18 @@ class TaskUtils:
 
             for attendee in account_attendees:
                 if attendee.get('badge_num', 0) in range(c.BADGE_RANGES[c.STAFF_BADGE][0],
-                                                         c.BADGE_RANGES[c.STAFF_BADGE][1]):
-                    if not c.SSO_EMAIL_DOMAINS:
-                        # Try to match staff to their existing badge, which would be newer than the one we're importing
+                                                         c.BADGE_RANGES[c.STAFF_BADGE][1]) \
+                        or int(attendee.get('badge_type', 0)) in [c.STAFF_BADGE, c.CONTRACTOR_BADGE]:
+                    if c.IMPORT_STAFF_ACCOUNTS:
                         old_badge_num = attendee['badge_num']
-                        existing_staff = session.query(Attendee).join(BadgeInfo).filter(BadgeInfo.ident == old_badge_num).first()
-                        if existing_staff:
-                            existing_staff.managers.append(account)
-                            session.add(existing_staff)
-                            account_owner = existing_staff
-                        else:
-                            new_staff = TaskUtils.basic_attendee_import(attendee)
-                            new_staff.badge_num = old_badge_num
-                            new_staff.managers.append(account)
-                            session.add(new_staff)
-                            account_owner = new_staff
-                    # If SSO is used for attendee accounts, we don't import staff at all
+
+                        new_staff = TaskUtils.basic_attendee_import(attendee)
+                        new_staff.badge_status = c.NEW_STATUS
+                        new_staff.badge_num = old_badge_num
+                        new_staff.managers.append(account)
+                        new_staff.imported_staff = True
+                        session.add(new_staff)
+                        account_owner = new_staff
                 else:
                     new_attendee = TaskUtils.basic_attendee_import(attendee)
                     new_attendee.paid = c.NOT_PAID
@@ -2403,6 +2435,7 @@ class TaskUtils:
             except Exception as ex:
                 attendee_warning = "Could not import attendees: {}".format(str(ex))
                 import_job.errors += "; {}".format(attendee_warning) if import_job.errors else attendee_warning
+                return
 
             # Remove categories that don't exist this year
             current_categories = group_to_import.get('categories', '')

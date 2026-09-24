@@ -78,7 +78,12 @@ class Root:
 
         if not send_after:
             fifteen_mins = datetime.now(pytz.UTC) + timedelta(seconds=900)
-            emails = emails.filter(or_(Email.send_after == None, Email.send_after < fifteen_mins))
+            excluded_automated_emails = session.query(AutomatedEmail.id).filter(
+                AutomatedEmail.active_after != None, AutomatedEmail.active_after > fifteen_mins)
+            excluded_ids = [id for id, in excluded_automated_emails]
+            emails = emails.filter(
+                ~Email.automated_email_id.in_(excluded_ids),
+                or_(Email.send_after == None, Email.send_after < fifteen_mins))
 
         if search_text:
             if subject:
@@ -95,7 +100,6 @@ class Root:
             'search_text': search_text if not subject else '',
             'subject_search_text': search_text if subject else '',
             'department_id': params.get('department_id', ''),
-            'depts_by_sender': depts_by_sender,
             'email_status': status or [str(val) for val in c.EMAIL_STATUS.keys()],
             'send_after': send_after,
         }
@@ -155,7 +159,6 @@ class Root:
             'automated_emails': emails_by_sender,
             'queued_email_counts': queued_email_counts,
             'sent_email_counts': sent_email_counts,
-            'depts_by_sender': depts_by_sender,
             'department_id': department_id,
             'policy': policy,
             'checklist': department_id and checklist,
@@ -205,7 +208,7 @@ class Root:
                     check_emails_for_fixture.delay(email.id)
                     message += " and email generation started"
                 else:
-                    message = +". This email is not eligible for generation due to the current settings"
+                    message += ". This email is not eligible for generation due to the current settings"
             raise HTTPRedirect('automated_email?id={}&message={}', id, f'{message}.')
         
         return {

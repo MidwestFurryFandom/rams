@@ -86,12 +86,12 @@
     <div role="tabpanel" class="tab-pane" id="group-info" aria-labelledby="group-info-tab">
   {% else %}
     <div>
-      <a href="index{{ '#dealers' if group.is_dealer else '' }}" class="btn btn-info mb-3">Back to Group List</a>
+      <a href="index{{ '?group_type=dealer' if group.is_dealer else '' }}" class="btn btn-info mb-3">Back to Group List</a>
     <h3>New {{ c.DEALER_TERM|title if group.is_dealer else "Group" }} Info</h3>
   {% endif %}
   {{ form_macros.form_validation('group-form', 'validate_group') }}
   <form novalidate method="post" id="group-form" action="form" enctype="multipart/form-data" x-data="{
-    guest_group_type: {{ (group.guest_group_type or 0)|jsonize }},
+    guest_group_type: {{ (group.guest.group_type or 0)|jsonize }},
     is_dealer: {{ group.is_dealer|jsonize }},
     is_new: {{ group.is_new|jsonize }},
     badges: {{ 1 if group.is_new else group.badges }}, 

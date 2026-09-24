@@ -18,6 +18,7 @@ from uber.custom_tags import format_currency, email_only
 from uber.utils import report_critical_exception, listify, is_listy
 import uber.spin_rest_utils as spin_rest_utils
 from uber.decorators import cached_property, classproperty
+from uber.serializer import serializer
 
 log = logging.getLogger(__name__)
 
@@ -175,7 +176,13 @@ class PreregCart:
         # These aren't valid properties on the model, so they're removed and re-added
         name = d.pop('name', '')
         badges = d.pop('badges', 0)
+        # SQLModel only applies columns and relationships in the constructor. extra_attrs will 
+        # capture any other properties that need to be carried over as well
+        extra_attrs = {attr: d.pop(attr) for attr in uber.models.Attendee._extra_apply_attrs_restricted if attr in d}
         a = uber.models.Attendee(**d)
+        for attr, val in extra_attrs.items():
+            setattr(a, attr, val)
+            d[attr] = val
         a.name = d['name'] = name
         a.badges = d['badges'] = badges
 
@@ -1173,7 +1180,7 @@ class SpinTerminalRequest(TransactionRequest):
 
         if self.api_response_successful(response_json):
             c.REDIS_STORE.hset(c.REDIS_PREFIX + 'spin_terminal_txns:' + self.terminal_id,
-                               'last_response', json.dumps(response_json))
+                               'last_response', json.dumps(response_json, cls=serializer))
             c.REDIS_STORE.hset(c.REDIS_PREFIX + 'spin_terminal_txns:' + self.terminal_id,
                                'last_error', '')
         else:
@@ -1976,7 +1983,7 @@ class ReceiptManager:
 
             if model and isinstance(model, Group) and model.is_dealer and not txn.receipt.open_purchase_items:
                 EmailService.queue_email(session, 'dealer_payment_admin', to=c.MARKETPLACE_NOTIFICATIONS_EMAIL,
-                                         data={'group': model})
+                                         data={'group': model, 'amount_paid_repr': model.amount_paid_repr})
             if model and isinstance(model, ArtShowApplication) and not txn.receipt.open_purchase_items:
                 EmailService.queue_email(session, 'art_show_payment_admin', to=c.ART_SHOW_NOTIFICATIONS_EMAIL,
                                          data={'app': model})
