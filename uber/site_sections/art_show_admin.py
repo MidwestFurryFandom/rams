@@ -79,6 +79,8 @@ class Root:
                     if 'app_paid' in params and int(params['app_paid']) != app_paid and int(params['app_paid']) > 0:
                         session.add(attendee)
                         app.attendee = attendee
+                for form in forms.values():
+                    form.populate_obj(app)
 
                 session.add(app)
                 if params.get('save_return_to_search', False):
