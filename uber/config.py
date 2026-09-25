@@ -378,7 +378,15 @@ class Config(_Overridable):
         if section == 'group_admin' and any(x in access for x in ['dealer_admin', 'guest_admin',
                                                                   'band_admin', 'showcase_admin']):
             return True
-        
+
+        # partition_admin: any admin with at least one PartitionOwner grant
+        # (or a global lottery admin) may visit the partition-scoped pages;
+        # the per-page methods then gate further via uber.hotel.perms
+        # helpers. HAS_HOTEL_LOTTERY_ACCESS is request-cached, so repeated
+        # access checks during one render don't re-query.
+        if section == 'partition_admin' and self.HAS_HOTEL_LOTTERY_ACCESS:
+            return True
+
     def update_name_problems(self):
         c.PROBLEM_NAMES = {}
         file_loc = os.path.join(c.UPLOADED_FILES_DIR, 'problem_names.csv')
@@ -434,7 +442,7 @@ class Config(_Overridable):
                 for count, desc in c.TABLE_OPTS]
     
     @property
-    def VOLUNTEER_SIGNUPS_AVAILABLE(self):
+    def CHECKLIST_OR_SIGNUPS_OPEN(self):
         return not c.VOLUNTEER_CHECKLIST_OPEN and c.AFTER_SHIFTS_CREATED or c.VOLUNTEER_CHECKLIST_OPEN and c.AFTER_VOLUNTEER_CHECKLIST_OPEN
     
     def drop_shifts_email(self, badge_type):
@@ -470,20 +478,30 @@ class Config(_Overridable):
         We have to run our form validations based on which 'step' in the form someone is, but
         the number of steps depends on the entry type and event config. This builds
         a dict that allows you to look up each step number based on a key.
+
+        The lists are the EFFECTIVE steps: 'selection_pref' only renders
+        when the selection-priorities feature is on and more than one
+        priority option is configured (both config-driven -
+        HOTEL_LOTTERY_PRIORITIES_OPTS comes from [hotel_lottery]
+        [[priorities]]), so it is dropped here when it wouldn't render.
+        That keeps the step numbers - which the form templates' step JS,
+        LotteryApplication.last_step, and the hotel_lottery validations
+        all use - in sync with the accordion steps actually shown.
         """
+        priorities_shown = (
+            self.HOTEL_LOTTERY_PRIORITIES_ENABLED
+            and len(getattr(self, 'HOTEL_LOTTERY_PRIORITIES_OPTS', [])) > 1)
 
         steps = {}
-        step = 0
-        for step_name in c.HOTEL_LOTTERY_ROOM_STEPS:
-            step += 1
-            steps[f'room_{step_name}'] = step
-        steps['room_final_step'] = step
-
-        step = 0
-        for step_name in c.HOTEL_LOTTERY_SUITE_STEPS:
-            step += 1
-            steps[f'suite_{step_name}'] = step
-        steps['suite_final_step'] = step
+        for prefix, step_names in [('room', c.HOTEL_LOTTERY_ROOM_STEPS),
+                                   ('suite', c.HOTEL_LOTTERY_SUITE_STEPS)]:
+            step = 0
+            for step_name in step_names:
+                if step_name == 'selection_pref' and not priorities_shown:
+                    continue
+                step += 1
+                steps[f'{prefix}_{step_name}'] = step
+            steps[f'{prefix}_final_step'] = step
 
         return steps
 
@@ -504,17 +522,41 @@ class Config(_Overridable):
         Adds free promo codes to the badge count, since these are promised badges and this property is used for our
         badge sales cap. Free codes in PC groups are excluded as they often have far more badges than will ever be claimed.
         """
-        from uber.models import Session, PromoCode
-        base_count = self.get_badge_count_by_type(c.ATTENDEE_BADGE)
-        with Session() as session:
-            pc_code_sum = session.query(func.sum(PromoCode.uses_remaining)).filter(
-                or_(PromoCode.cost > 0, PromoCode.group_id == None),
-                PromoCode.discount == None, PromoCode.uses_remaining > 0,
-                or_(PromoCode.discount_on.contains(c.EVERYTHING),
-                    PromoCode.discount_on.contains(c.BASE_BADGE))).all()
-            code_count = pc_code_sum[0][0]
-        return base_count + self.get_badge_promo_codes()
+        return self.get_badge_count_by_type(c.ATTENDEE_BADGE) + self.get_badge_promo_codes()
     
+    def get_stock_count(self, item_check, stock_setting):
+        """
+        Returns <item_check>_COUNT for an _AVAILABLE check. Every prereg page checks stock, so all
+        processes share one cached count: for stock_count_cache_seconds while the count is comfortably
+        below the stock (more than stock_count_cache_margin away) or already sold out, and for
+        stock_count_near_cap_cache_seconds when it's close to selling out.
+        """
+        ttl = self.STOCK_COUNT_CACHE_SECONDS
+        if not ttl:
+            return getattr(self, item_check + '_COUNT', None)
+
+        key = f'{self.REDIS_PREFIX}stock_count:{item_check}'
+        try:
+            cached = self.REDIS_STORE.get(key)
+        except Exception:
+            log.warning(f'Could not read cached {item_check} count from Redis', exc_info=True)
+            cached = None
+        if cached is not None:
+            return int(cached)
+
+        count = getattr(self, item_check + '_COUNT', None)
+        if count is not None:
+            stock = int(stock_setting)
+            if stock - self.STOCK_COUNT_CACHE_MARGIN <= int(count) < stock:
+                ttl = self.STOCK_COUNT_NEAR_CAP_CACHE_SECONDS
+            if not ttl:
+                return count
+            try:
+                self.REDIS_STORE.set(key, int(count), ex=ttl)
+            except Exception:
+                log.warning(f'Could not cache {item_check} count in Redis', exc_info=True)
+        return count
+
     def get_badge_promo_codes(self):
         # We need a slightly different calculation than normal for base badge promo codes
         from uber.models import Session, PromoCode
@@ -613,7 +655,7 @@ class Config(_Overridable):
     def PREREG_BADGE_TYPES(self):
         types = [self.ATTENDEE_BADGE, self.PSEUDO_DEALER_BADGE]
         if c.UNDER_13 in c.AGE_GROUP_CONFIGS and c.AGE_GROUP_CONFIGS[c.UNDER_13]['can_register']:
-            types.append(self.CHILD_BADGE)
+            types.append(self.PSEUDO_UNDER_13_BADGE)
         for reg_open, badge_type in [(self.BEFORE_GROUP_PREREG_TAKEDOWN, self.PSEUDO_GROUP_BADGE)]:
             if reg_open:
                 types.append(badge_type)
@@ -739,6 +781,19 @@ class Config(_Overridable):
             getattr(self, level + "_LEVEL"), getattr(self, level + "_AVAILABLE")]
             for level in ['SHIRT', 'SUPPORTER', 'SEASON']
         ])
+    
+    @property
+    def kickin_stock_matrix(self):
+        return dict([[
+            getattr(self, level + "_LEVEL"), getattr(self, level + "_STOCK")]
+            for level in ['SHIRT', 'SUPPORTER', 'SEASON']
+        ])
+    
+    @property
+    def EXTRA_ADDON_STATS(self):
+        # Plugins can use this to add basic line items for extra add-on purchases to the stats page
+        # Each line item should be a tuple of (desc, count) which will be displayed in a <ul> tag
+        return []
 
     @property
     def PREREG_DONATION_OPTS(self):
@@ -758,47 +813,14 @@ class Config(_Overridable):
             return self.DONATION_TIER_OPTS
 
     @property
-    def FORMATTED_DONATION_DESCRIPTIONS(self):
-        # TODO: Remove this once the admin form is converted to the new form system
-
-        """
-        A list of the donation descriptions, formatted for use on attendee-facing pages.
-
-        This does NOT filter out unavailable kick-ins so we can use it on attendees' confirmation pages
-        to show unavailable kick-ins they've already purchased. To show only available kick-ins, use
-        PREREG_DONATION_DESCRIPTIONS.
-        """
-        donation_list = self.DONATION_TIER_DESCRIPTIONS.items()
-
-        donation_list = sorted(donation_list, key=lambda tier: tier[1]['price'])
-
-        # add in all previous descriptions.  the higher tiers include all the lower tiers
-        for entry in donation_list:
-            all_desc_and_links = \
-                [(tier[1]['description'], tier[1]['link']) for tier in donation_list
-                    if tier[1]['price'] > 0 and tier[1]['price'] < entry[1]['price']] \
-                + [(entry[1]['description'], entry[1]['link'])]
-
-            # maybe slight hack. descriptions and links are separated by '|' characters so we can have multiple
-            # items displayed in the donation tiers.  in an ideal world, these would already be separated in the INI
-            # and we wouldn't have to do it here.
-            entry[1]['all_descriptions'] = []
-            for item in all_desc_and_links:
-                descriptions = item[0].split('|')
-                links = item[1].split('|')
-                entry[1]['all_descriptions'] += list(zip(descriptions, links))
-
-        return [dict(tier[1]) for tier in donation_list]
-
-    @property
     def UNAVAILABLE_REG_TYPES(self):
         unavailable_types = []
 
         if c.GROUPS_ENABLED and c.AFTER_GROUP_PREREG_TAKEDOWN:
             unavailable_types.append(c.PSEUDO_GROUP_BADGE)
 
-        if c.CHILD_BADGE in c.PREREG_BADGE_TYPES and not c.CHILD_BADGE_AVAILABLE:
-            unavailable_types.append(c.CHILD_BADGE)
+        if c.PSEUDO_UNDER_13_BADGE in c.PREREG_BADGE_TYPES and not c.CHILD_BADGE_AVAILABLE:
+            unavailable_types.append(c.PSEUDO_UNDER_13_BADGE)
 
         return unavailable_types
 
@@ -825,14 +847,14 @@ class Config(_Overridable):
                 'price': c.GROUP_PRICE,
             })
 
-        if c.CHILD_BADGE in c.PREREG_BADGE_TYPES:
+        if c.PSEUDO_UNDER_13_BADGE in c.PREREG_BADGE_TYPES:
             reg_type_opts.append({
                 'name': "12 and Under",
                 'desc': Markup(f"Attendees 12 and younger at the start of {c.EVENT_NAME} must be accompanied "
                                "by an adult with a valid Attendee badge. <br/><br/>"
                                "<span class='form-text text-danger'>Price is always half that of the Single "
                                "Attendee badge price. Badges for attendees 5 and younger are free.</span>"),
-                'value': c.CHILD_BADGE,
+                'value': c.PSEUDO_UNDER_13_BADGE,
                 'price': str(c.BADGE_PRICE - math.ceil(c.BADGE_PRICE / 2)),
             })
 
@@ -885,79 +907,13 @@ class Config(_Overridable):
         return merch_tiers
 
     @property
-    def PREREG_DONATION_DESCRIPTIONS(self):
-        # TODO: Remove this once the admin form is converted to the new form system
-
-        donation_list = self.FORMATTED_DONATION_DESCRIPTIONS
-
-        # include only the items that are actually available for purchase
-        if not self.SHARED_KICKIN_STOCKS:
-            donation_list = [tier for tier in donation_list
-                             if tier['price'] not in self.kickin_availability_matrix
-                             or self.kickin_availability_matrix[tier['price']]]
-        elif self.BEFORE_SHIRT_DEADLINE and not self.SHIRT_AVAILABLE:
-            donation_list = [tier for tier in donation_list if tier['price'] < self.SHIRT_LEVEL]
-        elif self.BEFORE_SUPPORTER_DEADLINE and not self.SUPPORTER_AVAILABLE:
-            donation_list = [tier for tier in donation_list if tier['price'] < self.SUPPORTER_LEVEL]
-        elif self.BEFORE_SUPPORTER_DEADLINE and not self.SEASON_AVAILABLE:
-            donation_list = [tier for tier in donation_list if tier['price'] < self.SEASON_LEVEL]
-
-        return [tier for tier in donation_list if
-                (tier['price'] >= c.SHIRT_LEVEL and tier['price'] < c.SUPPORTER_LEVEL and c.BEFORE_SHIRT_DEADLINE) or
-                (tier['price'] >= c.SUPPORTER_LEVEL and c.BEFORE_SUPPORTER_DEADLINE) or
-                tier['price'] < c.SHIRT_LEVEL]
-
-    @property
-    def FORMATTED_DONATION_DESCRIPTIONS_EXCLUSIVE(self):
-        """
-        A list of the donation descriptions, formatted for use on attendee-facing pages.
-        """
-        donation_list = self.DONATION_TIER_DESCRIPTIONS.items()
-
-        donation_list = sorted(donation_list, key=lambda tier: tier[1]['value'])
-
-        # add in all previous descriptions.  the higher tiers include all the lower tiers
-        for entry in donation_list:
-            all_desc_and_links = \
-                [(tier[1]['description'], tier[1]['link']) for tier in donation_list
-                    if tier[1]['value'] > 0 and tier[1]['value'] < entry[1]['value']] \
-                + [(entry[1]['description'], entry[1]['link'])]
-
-            # maybe slight hack. descriptions and links are separated by '|' characters so we can have multiple
-            # items displayed in the donation tiers.  in an ideal world, these would already be separated in the INI
-            # and we wouldn't have to do it here.
-            entry[1]['all_descriptions'] = []
-            for item in all_desc_and_links:
-                descriptions = item[0].split('|')
-                links = item[1].split('|')
-                entry[1]['all_descriptions'] += list(zip(descriptions, links))
-
-        return [dict(tier[1]) for tier in donation_list]
-
-    @property
-    def PREREG_DONATION_DESCRIPTIONS_EXCLUSIVE(self):
-        donation_list = self.FORMATTED_DONATION_DESCRIPTIONS_EXCLUSIVE
-
-        # include only the items that are actually available for purchase
-        if not self.SHARED_KICKIN_STOCKS:
-            donation_list = [tier for tier in donation_list
-                             if tier['value'] not in self.kickin_availability_matrix
-                             or self.kickin_availability_matrix[tier['value']]]
-        elif self.BEFORE_SHIRT_DEADLINE and not self.SHIRT_AVAILABLE:
-            donation_list = [tier for tier in donation_list if tier['value'] < self.SHIRT_LEVEL]
-        elif self.BEFORE_SUPPORTER_DEADLINE and not self.SUPPORTER_AVAILABLE:
-            donation_list = [tier for tier in donation_list if tier['value'] < self.SUPPORTER_LEVEL]
-        elif self.BEFORE_SUPPORTER_DEADLINE and self.SEASON_AVAILABLE:
-            donation_list = [tier for tier in donation_list if tier['value'] < self.SEASON_LEVEL]
-
-        return [tier for tier in donation_list if
-                (tier['value'] >= c.SHIRT_LEVEL and tier['value'] < c.SUPPORTER_LEVEL and c.BEFORE_SHIRT_DEADLINE) or
-                (tier['value'] >= c.SUPPORTER_LEVEL and c.BEFORE_SUPPORTER_DEADLINE) or
-                tier['value'] < c.SHIRT_LEVEL]
-
-    @property
     def PREREG_DONATION_TIERS(self):
         return dict(self.PREREG_DONATION_OPTS)
+    
+    def get_amount_extra_tax(self, amount_extra):
+        if c.MERCH_TAX:
+            return amount_extra * (c.MERCH_TAX / 10000)
+        return 0
 
     @property
     def ONE_WEEK_OR_TAKEDOWN_OR_EPOCH(self):
@@ -1078,15 +1034,40 @@ class Config(_Overridable):
     @dynamic
     def CURRENT_ADMIN(self):
         try:
+            admin_account_id = cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None))
+            if not admin_account_id:
+                return {}  # not an admin; skip the query that could only raise NoResultFound
+
             from uber.models import Session, AdminAccount, Attendee
             with Session() as session:
                 attrs = Attendee.to_dict_default_attrs + ['admin_account', 'assigned_depts', 'logged_in_name']
                 admin_attendee = session.query(Attendee).join(Attendee.admin_account) \
-                    .filter(AdminAccount.id == cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None))) \
+                    .filter(AdminAccount.id == admin_account_id) \
                     .options(
                         joinedload(Attendee.admin_account),
                         selectinload(Attendee.assigned_depts)).one()
                 return admin_attendee.to_dict(attrs)
+        except Exception:
+            return {}
+
+    @request_cached_property
+    @dynamic
+    def CURRENT_VOLUNTEER(self):
+        try:
+            from uber.models import Session, Attendee
+            with Session() as session:
+                attrs = Attendee.to_dict_default_attrs + ['logged_in_name']
+                attendee = session.volunteer_from_id(cherrypy.session.get('staffer_id'))
+                data = attendee.to_dict(attrs)
+                # to_dict only serializes column attrs cleanly; the shifts
+                # page's compliance banner needs these computed properties,
+                # so serialize them by hand (violations are model rows).
+                data['weighted_hours'] = attendee.weighted_hours
+                data['shift_compliance_violations'] = [
+                    {'night_date': req.night_date,
+                     'required_weighted_hours': req.required_weighted_hours}
+                    for req in attendee.shift_compliance_violations]
+                return data
         except Exception:
             return {}
 
@@ -1141,7 +1122,8 @@ class Config(_Overridable):
                 query = query.filter(Department.solicits_volunteers == True)
 
             if admin_access and not self.has_section_or_page_access(full=True):
-                admin_memberships = [str(d.id) for d in session.current_admin_account().attendee.dept_memberships_with_inherent_role]
+                admin_memberships = [str(d.department_id) for d in 
+                                     session.current_admin_account().attendee.dept_memberships_with_inherent_role]
                 query = query.filter(Department.id.in_(admin_memberships))
 
             return [tuple(info) for info in query.order_by(Department.name)]
@@ -1164,7 +1146,7 @@ class Config(_Overridable):
     @request_cached_property
     @dynamic
     def PUBLIC_DEPARTMENT_OPTS_WITH_DESC(self):
-        return self.get_dept_opts(public=True, include_desc=True)
+        return [('', 'Anywhere', '')] + self.get_dept_opts(public=True, include_desc=True)
 
     @request_cached_property
     @dynamic
@@ -1242,7 +1224,7 @@ class Config(_Overridable):
     @property
     @dynamic
     def REMAINING_BADGES(self):
-        return max(0, self.ATTENDEE_BADGE_STOCK - self.ATTENDEE_BADGE_COUNT)
+        return max(0, self.ATTENDEE_BADGE_STOCK - self.get_stock_count('ATTENDEE_BADGE', self.ATTENDEE_BADGE_STOCK))
 
     @request_cached_property
     @dynamic
@@ -1276,6 +1258,29 @@ class Config(_Overridable):
     @dynamic
     def ADMIN_FULL_ACCESS_SET(self):
         return uber.models.AdminAccount.get_access_set(full=True)
+
+    @request_cached_property
+    @dynamic
+    def HAS_HOTEL_LOTTERY_ACCESS(self):
+        """True iff the current admin can see the hotel lottery admin area
+        at all - either as a global lottery admin (HAS_HOTEL_LOTTERY_ADMIN_ACCESS)
+        or as a per-partition owner with at least one PartitionOwner grant.
+
+        Used to gate the cross-section "Hotel" menu entry under People;
+        partition owners need a way to reach their dashboard even though
+        they don't carry the site-section permission.
+        """
+        if self.HAS_HOTEL_LOTTERY_ADMIN_ACCESS:
+            return True
+        try:
+            account_id = cherrypy.session.get('account_id')
+            if not account_id:
+                return False
+            from uber.hotel.perms import has_any_lottery_access
+            with uber.models.Session() as sess:
+                return has_any_lottery_access(sess, account_id)
+        except Exception:
+            return False
 
     @cached_property
     def ADMIN_PAGES(self):
@@ -1355,10 +1360,11 @@ class Config(_Overridable):
             return self.EMAIL_SIGNATURES.get(signature_key, '')
         return ""
     
-    # A list of department emails and their other related configured email addresses
     @property
     def RELATED_EMAILS(self):
+        # A list of department emails and their other related configured email addresses
         from uber.custom_tags import email_only
+
         email_dict = {
             c.MARKETPLACE_EMAIL: [c.MARKETPLACE_NOTIFICATIONS_EMAIL],
             c.ART_SHOW_EMAIL: [c.ART_SHOW_NOTIFICATIONS_EMAIL, c.ART_SHOW_BCC_EMAIL],
@@ -1372,6 +1378,16 @@ class Config(_Overridable):
 
         # Run email_only on all the keys and values of email_dict and then return it
         return dict(map(lambda x: (email_only(x), list(map(email_only, email_dict[x]))), email_dict))
+    
+    @request_cached_property
+    def DEPTS_BY_SENDER(self):
+        # Helps pages display which department is associated with a particular email or fixture
+        from uber.models import Session
+        from uber.email import EmailService
+        with Session() as session:
+            depts_by_sender = EmailService.emails_from_depts(session)
+        return depts_by_sender
+
 
     # =========================
     # indie showcases (mivs, indie arcade, indie retro)
@@ -1614,7 +1630,7 @@ class Config(_Overridable):
                 return True
 
             # Only poll the DB if stock is configured
-            count_check = getattr(self, item_check + '_COUNT', None)
+            count_check = self.get_stock_count(item_check, stock_setting)
             if count_check is None:
                 # Things with no count are never considered available
                 return False
@@ -1814,26 +1830,6 @@ def create_hour_opts(start_hour, end_hour, step, prefix=''):
             return opt_list
 
 
-def build_hotel_inventory(inventory_type, room_types):
-    hotel_inventory = []
-    hotel_inventory_config = _config['hotel_lottery'].get(inventory_type, {})
-    for key, item in c.HOTEL_LOTTERY_HOTELS.items():
-        hotel_enum, _ = item
-        for room_type_key, quantity in hotel_inventory_config.get(key, {}).items():
-            room_type_enum, room_type = room_types.get(room_type_key)
-            if not room_type:
-                raise ValueError(f"Could not locate hotel room_type {room_type_key}")
-            capacity = room_type.get(f'{key}_capacity', room_type['capacity'])
-            min_capacity = room_type.get(f'{key}_min_capacity', room_type['min_capacity'])
-            hotel_inventory.append({
-                "id": str(hotel_enum),
-                "capacity": int(capacity),
-                "min_capacity": int(min_capacity),
-                "room_type": str(room_type_enum),
-                "quantity": int(quantity),
-                "name": room_type_key,
-            })
-    return hotel_inventory
     
 
 c = Config()
@@ -2103,7 +2099,15 @@ c.SHIRT_OPTS = sorted(c.SHIRT_OPTS)
 shirt_label_lookup = {val: key for key, val in c.SHIRT_OPTS}
 c.SHIRT_SIZE_STOCKS = {shirt_label_lookup[val]: key for key, val in c.SHIRT_STOCK_OPTS}
 
-c.DONATION_TIER_OPTS = [(amt, '+ ${}: {}'.format(amt, desc) if amt else desc) for amt, desc in c.DONATION_TIER_OPTS]
+from uber.custom_tags import format_currency
+if c.MERCH_TAX and c.INCLUDE_MERCH_TAX:
+    new_opts = []
+    for amt, desc in c.DONATION_TIER_OPTS:
+        total = amt + c.get_amount_extra_tax(amt)
+        new_opts.append((amt, f'+ {format_currency(total)}: {desc}' if amt else desc))
+    c.DONATION_TIER_OPTS = new_opts
+else:
+    c.DONATION_TIER_OPTS = [(amt, '+ ${}: {}'.format(amt, desc) if amt else desc) for amt, desc in c.DONATION_TIER_OPTS]
 
 c.DONATION_TIER_ITEMS = {}
 c.DONATION_TIER_DESCRIPTIONS = _config.get('donation_tier_descriptions', {})
@@ -2113,8 +2117,13 @@ for _ident, _tier in c.DONATION_TIER_DESCRIPTIONS.items():
     except ValueError:
         pass
 
+    if price and c.MERCH_TAX and c.INCLUDE_MERCH_TAX:
+        total = price + c.get_amount_extra_tax(price)
+        _tier['price'] = total
+    else:
+        _tier['price'] = price
+
     _tier['value'] = price
-    _tier['price'] = price
     if price:  # ignore the $0 kickin level
         c.DONATION_TIER_ITEMS[price] = _tier['merch_items'] or _tier['description'].split('|')
 
@@ -2126,23 +2135,56 @@ c.WRISTBAND_COLORS = defaultdict(lambda: c.WRISTBAND_COLORS[c.DEFAULT_WRISTBAND]
 c.SAME_NUMBER_REPEATED = r'^(\d)\1+$'
 
 c.HOTEL_LOTTERY = _config.get('hotel_lottery', {})
-for key in ["hotels", "room_types", "suite_room_types", "priorities"]:
-    opts = []
-    dictionary = {}
-    for name, item in c.HOTEL_LOTTERY.get(key, {}).items():
-        if isinstance(item, dict):
-            item.__hash__ = lambda x: hash(x.name + x.description)
-            base_key = f"HOTEL_LOTTERY_{name.upper()}"
-            dict_key = int(sha512(base_key.encode()).hexdigest()[:7], 16)
-            setattr(c, base_key, dict_key)
-            opts.append((dict_key, item))
-            dictionary[name] = (dict_key, item)
-    setattr(c, f"HOTEL_LOTTERY_{key.upper()}_OPTS", opts)
-    setattr(c, f"HOTEL_LOTTERY_{key.upper()}", dictionary)
 
-c.HOTEL_LOTTERY_ROOM_INVENTORY = build_hotel_inventory('hotel_room_inventory', c.HOTEL_LOTTERY_ROOM_TYPES)
-c.HOTEL_LOTTERY_SUITE_INVENTORY = build_hotel_inventory('hotel_suite_inventory', c.HOTEL_LOTTERY_SUITE_ROOM_TYPES)
+# Ranking options for the optional "selection priorities" step. Built from the
+# [hotel_lottery] [[priorities]] config; each entry becomes a (key, info) pair
+# the Ranking widget can render. Only used when HOTEL_LOTTERY_PRIORITIES_ENABLED.
+c.HOTEL_LOTTERY_PRIORITIES_OPTS = [
+    (key, {
+        'name': item.get('name', key),
+        'description': item.get('description', ''),
+        'footnote': item.get('footnote', ''),
+    })
+    for key, item in c.HOTEL_LOTTERY.get('priorities', {}).items()
+    if isinstance(item, dict)
+]
+
+# How rooms are paid for, built from [hotel_lottery] [[payment_types]].
+# RoomAssignment.payment_type stores the section name, so export_name can be
+# changed freely. Look up with c.HOTEL_PAYMENT_TYPES.get() and fall back to the
+# raw key, otherwise a renamed section blanks the display instead of showing
+# that the row is orphaned.
+c.HOTEL_PAYMENT_TYPES = {
+    key: {
+        'name': item.get('name', '') or key,
+        'export_name': item.get('export_name', ''),
+        'require_cc': item.get('require_cc', True),
+        'event_pays_parking': item.get('event_pays_parking', False),
+    }
+    for key, item in c.HOTEL_LOTTERY.get('payment_types', {}).items()
+    if isinstance(item, dict)
+}
+
+c.HOTEL_PAYMENT_TYPE_OPTS = [(key, item['name']) for key, item in c.HOTEL_PAYMENT_TYPES.items()]
+
+# The payment types that oblige the guest to guarantee the room with a card.
+# Both RoomAssignment.require_cc and its SQL expression read this one list.
+c.HOTEL_PAYMENT_TYPES_REQUIRING_CC = [
+    key for key, item in c.HOTEL_PAYMENT_TYPES.items() if item['require_cc']]
+
+c.HOTEL_PAYMENT_TYPES_WITH_PARKING = [
+    key for key, item in c.HOTEL_PAYMENT_TYPES.items() if item['event_pays_parking']]
+
+c.DEFAULT_HOTEL_PAYMENT_TYPE = 'credit_card' if 'credit_card' in c.HOTEL_PAYMENT_TYPES else (
+    c.HOTEL_PAYMENT_TYPE_OPTS[0][0] if c.HOTEL_PAYMENT_TYPE_OPTS else '')
+
 c.HOTEL_LOTTERY_AWARD_STATUSES = [c.PROCESSED, c.AWARDED, c.SECURED]
+
+# RoomAssignment statuses that still hold inventory - the canonical "live
+# room" predicate used by capacity math, exports, and the attendee-facing
+# rooms views. Prefer RoomAssignment.is_live / Attendee.active_room_assignments
+# over spelling this list out at call sites.
+c.HOTEL_LIVE_ASSIGNMENT_STATUSES = [c.ASSIGNED, c.SECURED]
 
 # Allows 0-9, a-z, A-Z, and a handful of punctuation characters
 c.VALID_BADGE_PRINTED_CHARS = r'[a-zA-Z0-9!"#$%&\'()*+,\-\./:;<=>?@\[\\\]^_`\{|\}~ "]'

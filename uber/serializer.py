@@ -1,5 +1,9 @@
-import json
 import datetime
+import json
+
+from decimal import Decimal
+from sqlalchemy.ext import associationproxy
+from sqlmodel import SQLModel
 
 class serializer(json.JSONEncoder):
     """
@@ -47,3 +51,6 @@ serializer.register(datetime.date, lambda d: d.strftime('%Y-%m-%d'))
 serializer.register(datetime.datetime, lambda dt: dt.strftime(serializer._datetime_format))
 serializer.register(datetime.time, lambda t: t.strftime(serializer._datetime_format.split(' ')[1]))
 serializer.register(set, lambda s: sorted(list(s)))
+serializer.register(Decimal, lambda n: float(n))
+serializer.register(associationproxy._AssociationList, list)
+serializer.register(SQLModel, lambda m: m.to_dict())

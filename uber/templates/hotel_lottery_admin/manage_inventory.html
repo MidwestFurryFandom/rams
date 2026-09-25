@@ -1,0 +1,70 @@
+{% extends "base.html" %}{% set admin_area=True %}
+{% import 'hotel_lottery_admin/_macros.html' as hotel_macros with context %}
+{% block title %}Manage Room Inventory{% endblock %}
+{% block content %}
+
+{% include 'hotel_lottery_admin/inventory_subnav.html' %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0">Inventory</h2>
+  <a href="edit_inventory_item" class="btn btn-primary">Add Inventory Item</a>
+</div>
+
+{% if inventory %}
+<table class="table table-hover datatable">
+  <thead>
+    <tr>
+      <th>Hotel</th>
+      <th>Type</th>
+      <th>Name</th>
+      <th>Quantity</th>
+      <th>Assigned</th>
+      <th>Capacity</th>
+      <th>Min Capacity</th>
+      <th>Price</th>
+      <th>Staff Price</th>
+      <th>Vault Reference</th>
+      <th>Active</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in inventory %}
+    <tr{% if not item.active %} class="text-muted"{% endif %}>
+      <td>{{ item.hotel.name if item.hotel else 'Unknown' }}</td>
+      <td>
+        {% if item.is_suite %}
+          <span class="badge bg-info">Suite</span>
+        {% else %}
+          <span class="badge bg-secondary">Room</span>
+        {% endif %}
+        {{ item.display_name }}
+      </td>
+      <td>{{ item.name }}</td>
+      <td>{{ item.quantity }}</td>
+      <td>{{ assigned_per_block.get(item.id|string, 0) }}</td>
+      <td>{{ item.capacity }}</td>
+      <td>{{ item.min_capacity }}</td>
+      <td>{{ item.base_price|format_price or '-' }}{% if item.price_per_night or item.price_per_occupancy %}
+        <br/><small class="text-muted">varies</small>{% endif %}</td>
+      <td>{{ item.base_staff_price|format_price or '-' }}{% if item.price_per_night or item.price_per_occupancy %}
+        <br/><small class="text-muted">varies</small>{% endif %}</td>
+      <td>{{ item.vault_reference or '' }}</td>
+      <td>{{ 'Yes' if item.active else 'No' }}</td>
+      <td class="d-flex gap-1">
+        <a href="edit_inventory_item?id={{ item.id }}" class="btn btn-sm btn-outline-primary">Edit</a>
+        {{ hotel_macros.delete_button('inventory', item, 'manage_inventory') }}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="card card-body text-center text-muted">
+  No inventory items configured. <a href="edit_inventory_item">Add one</a>.
+</div>
+{% endif %}
+
+{{ "js/hotel-delete-conflicts.js"|serve_static_content }}
+
+{% endblock content %}

@@ -238,7 +238,7 @@ def must_select_type(form, field):
         return
 
     if form.attendance_type.data and form.attendance_type.data == c.WEEKEND and \
-            field.data not in [c.ATTENDEE_BADGE, c.PSEUDO_DEALER_BADGE, c.PSEUDO_GROUP_BADGE] + list(c.BADGE_TYPE_PRICES.keys()):
+            field.data not in c.PREREG_BADGE_TYPES + list(c.BADGE_TYPE_PRICES.keys()):
         raise ValidationError("Please select what type of badge you want.")
 
 
@@ -251,15 +251,6 @@ def no_more_custom_badges(form, field):
                 return
         raise ValidationError('Custom badges have already been ordered, please choose a different badge type.')
 
-
-@BadgeExtras.new_or_changed('badge_type')
-def out_of_badge_type(form, field):
-    badge_type = get_real_badge_type(field.data)
-    with Session() as session:
-        try:
-            session.get_next_badge_num(badge_type)
-        except AssertionError:
-            raise ValidationError('We are sold out of {} badges.'.format(c.BADGES[badge_type]))
 
 # =============================
 # OtherInfo
@@ -282,9 +273,12 @@ def promo_code_valid(form, field):
                     raise ValidationError("That promo code has been used already.")
 
 
-PreregOtherInfo.field_validation.required_fields = {
-    'requested_depts_ids': ('Please select at least one department to volunteer for, or check "Anywhere".',
-                            'staffing', lambda x: x and len(c.PUBLIC_DEPARTMENT_OPTS_WITH_DESC) > 1)
+StaffingInfo.field_validation.required_fields = {
+    'requested_depts_ids': (
+        'Please select at least one department to volunteer for, or check "Anywhere".',
+        'requested_depts_ids',
+        lambda x: not x.form.is_admin and x.form.model.staffing_or_will_be and \
+            len(c.PUBLIC_DEPARTMENT_OPTS_WITH_DESC) > 1 and not x.form.model.assigned_depts_ids)
     }
 
 # =============================

@@ -1,5 +1,7 @@
 import time
+import json
 import base64
+import hashlib
 import cherrypy
 import threading
 import requests
@@ -7,6 +9,7 @@ import traceback
 import logging
 import secrets
 from jose import jwt, jwk
+from jose.exceptions import ExpiredSignatureError
 from sqlalchemy.orm.exc import NoResultFound
 from urllib.parse import urlparse, parse_qsl
 
@@ -19,6 +22,21 @@ from uber.models import Attendee, AdminAccount, AttendeeAccount, AccessGroup, Se
 from uber.utils import normalize_email_legacy
 
 log = logging.getLogger(__name__)
+
+OIDC_TIMEOUT = 10
+
+# How long a refresh result is remembered for a given refresh token. A browser whose response (and new
+# cookies) was lost, e.g. to a CloudFront timeout, keeps sending the same refresh token; reuse the result
+# instead of asking Keycloak again on every request.
+REFRESH_RESULT_TTL = 60
+
+# Requests that never need a login check
+NO_LOGIN_PATHS = ('/static/', '/static_views/')
+NO_LOGIN_FILES = ('/favicon.ico', '/robots.txt')
+
+def request_cookie_value(name):
+    return cherrypy.request.cookie[name].value if name in cherrypy.request.cookie else None
+
 
 class OIDC(cherrypy.Tool):
     def __init__(self):
@@ -39,8 +57,19 @@ class OIDC(cherrypy.Tool):
         session.add(PasswordReset(attendee_account=attendee_account, admin_account=admin_account, token=token))
         session.commit()
 
-        EmailService.queue_email(session, 'sso_account_setup', attendee_account,
-                                 data={'admin_account': admin_account, 'token': token})
+        custom_sender = None
+        custom_subject = None
+        if len(attendee_account.valid_attendees) == 1:
+            attendee = attendee_account.valid_attendees[0]
+            if attendee.imported_staff:
+                custom_sender = c.STAFF_EMAIL
+            if attendee.group and attendee.group.guest and attendee.id == attendee.group.leader_id:
+                custom_sender = c.GUEST_GROUP_EMAILS[attendee.group.guest.group_type] or None
+        else:
+            custom_subject = f'Claim Your Badges for {c.EVENT_NAME_AND_YEAR}'
+
+        EmailService.queue_email(session, 'sso_account_setup', attendee_account, sender=custom_sender,
+                                 subject=custom_subject, data={'admin_account': admin_account, 'token': token})
 
     @classmethod
     def process_account_claim_token(cls, session, account_claim_token, sso_id=None, existing_account=None, dry_run=False):
@@ -51,35 +80,45 @@ class OIDC(cherrypy.Tool):
         admin_account = session.query(AdminAccount).join(AdminAccount.password_reset).filter(
                 PasswordReset.token == account_claim_token).first()
         
-        accounts_pluralized = 'these accounts' if attendee_account and admin_account else 'this account'
-        
+        badges_pluralized = 'your badges' if attendee_account and len(attendee_account.valid_attendees) > 1 else 'your badge'
+        accounts_to_claim = 2 if attendee_account and admin_account else 1
+        already_claimed = 0
+
         if attendee_account and attendee_account.sso_id:
             session.delete(attendee_account.password_reset)
             if sso_id and sso_id == attendee_account.sso_id:
-                message = f"You have already claimed {accounts_pluralized}."
-            attendee_account = None
+                already_claimed += 1
+            else:
+                attendee_account = None
         if admin_account and admin_account.sso_id:
             session.delete(admin_account.password_reset)
             if sso_id and sso_id == admin_account.sso_id:
-                message = f"You have already claimed {accounts_pluralized}."
-            admin_account = None
+                already_claimed += 1
+            else:
+                admin_account = None
+        
+        if already_claimed == accounts_to_claim:
+            cherrypy.request.attendee_account = getattr(attendee_account, 'id', None)
+            cherrypy.request.admin_account = getattr(admin_account, 'id', None)
+            return attendee_account, admin_account
 
         if not attendee_account and not admin_account:
-            message = "Invalid claim link. This link may have already been used."
-        elif existing_account and admin_account and any(attendee for attendee in existing_account.attendees if attendee.admin_account):
-            message = f"You cannot have more than one admin account associated with your {c.OIDC_ACCOUNT_NAME} for this event."
+            message = f"Invalid claim link. This link may have already been used OR a new link is already on its way."
+        elif existing_account and admin_account and existing_account.admin_account_id:
+            message = f"You cannot have more than one admin account associated with your {c.OIDC_ACCOUNT_NAME} account for this event."
         elif (sso_id or existing_account) and not cherrypy.session.get('oidc_email_verified'):
-            message = f"Please verify the email on your {c.OIDC_ACCOUNT_NAME} account to claim {accounts_pluralized}."
+            message = f"Please verify the email on your {c.OIDC_ACCOUNT_NAME} account to claim {badges_pluralized}."
         elif attendee_account and attendee_account.password_reset.is_expired:
             OIDC.send_claim_token(session, attendee_account, admin_account)
-            message = "This claim link has expired. You will automatically receive a new claim link in a few minutes."
+            message = f"This claim link has expired. A new one has been sent to {attendee_account.email}."
+            session.commit()
         elif attendee_account:
             for attendee in attendee_account.attendees:
                 if attendee.admin_account and attendee.admin_account.sso_id and sso_id and attendee.admin_account.sso_id != sso_id:
                         message = f"Your account has been set up incorrectly. Please contact us at {email_only(c.CONTACT_EMAIL)}."
         
         if message:
-            raise ValueError(message or "Invalid claim link. This link may have already been used.")
+            raise ValueError(message or f"Invalid claim link. This link may have already been used OR a new link is already on its way to {attendee_account.email}.")
         
         if sso_id and not dry_run:
             if admin_account:
@@ -120,10 +159,10 @@ class OIDC(cherrypy.Tool):
                 elif time.time() - self.key_fetch_time < 60:
                     return None
                 self.key_fetch_time = time.time()
-                oidc_config = requests.get(c.OIDC_METADATA_URL).json()
+                oidc_config = requests.get(c.OIDC_METADATA_URL, timeout=OIDC_TIMEOUT).json()
                 jwks_uri = oidc_config['jwks_uri']
                 
-                keys = requests.get(jwks_uri).json()['keys']
+                keys = requests.get(jwks_uri, timeout=OIDC_TIMEOUT).json()['keys']
                 self.jwks_keys = {key['kid']: key for key in keys}
                 log.info(f"Loaded {len(self.jwks_keys)} public keys from {c.OIDC_METADATA_URL}")
                 return self.jwks_keys.get(kid, None)
@@ -136,6 +175,8 @@ class OIDC(cherrypy.Tool):
         Cryptographically verifies the JWT signature using Keycloak's public keys.
         Returns the decoded payload if valid, raises Exception if not.
         """
+        if not token:
+            return None
         try:
             # Get the header to find the Key ID (kid)
             headers = jwt.get_unverified_header(token)
@@ -159,6 +200,9 @@ class OIDC(cherrypy.Tool):
                 options={"verify_at_hash": False}
             )
             return payload
+        except ExpiredSignatureError:
+            # Routine: the browser sent a token past its lifetime and the caller refreshes it.
+            return None
         except:
             traceback.print_exc()
             return None
@@ -186,6 +230,22 @@ class OIDC(cherrypy.Tool):
         admin_account = None
 
         with Session() as session:
+            existing_account = session.query(AttendeeAccount).filter(
+                AttendeeAccount.normalized_email == normalize_email_legacy(email)).first()
+            if existing_account:
+                if cherrypy.session.get('oidc_email_verified') or c.DEV_BOX:
+                    existing_account.sso_id = sso_id
+                    session.add(existing_account)
+                    for attendee in existing_account.valid_attendees:
+                        if attendee.admin_account:
+                            admin_account = attendee.admin_account
+                            admin_account.sso_id = sso_id
+                            session.add(admin_account)
+                    session.commit()
+                    return existing_account.id, getattr(admin_account, 'id', None)
+                else:
+                    return None, None
+
             attendee_account = session.create_attendee_account(email)
             attendee_account.sso_id = sso_id
             session.add(attendee_account)
@@ -223,6 +283,20 @@ class OIDC(cherrypy.Tool):
         Take the code received on our callback and exchange it for a JWT
         DOES NOT VERIFY THE JWT!
         """
+        # An authorization code can only be exchanged once, but the callback URL can arrive more than once: CloudFront
+        # retries a GET that timed out at the origin, and people hit refresh. Reuse the first exchange's tokens, but
+        # only for the same browser session, so a leaked code can't be replayed from somewhere else.
+        cache_key = None
+        session_id = request_cookie_value('session_id')
+        if session_id:
+            cache_key = f'{c.REDIS_PREFIX}oidc_code:{hashlib.sha256(f"{session_id}:{code}".encode()).hexdigest()}'
+            try:
+                cached = c.REDIS_STORE.get(cache_key)
+                if cached:
+                    return json.loads(cached)
+            except Exception:
+                log.warning('Could not read cached OIDC code exchange', exc_info=True)
+
         try:
             payload = {
                 'grant_type': 'authorization_code',
@@ -232,18 +306,33 @@ class OIDC(cherrypy.Tool):
                 'redirect_uri': redirect_uri
             }
 
-            response = requests.post(c.OIDC_TOKEN_ENDPOINT, data=payload)
+            response = requests.post(c.OIDC_TOKEN_ENDPOINT, data=payload, timeout=OIDC_TIMEOUT)
             response.raise_for_status()
-            return response.json()
+            tokens = response.json()
         except:
             traceback.print_exc()
             return None
+
+        if cache_key:
+            try:
+                c.REDIS_STORE.set(cache_key, json.dumps(tokens), ex=REFRESH_RESULT_TTL)
+            except Exception:
+                log.warning('Could not cache OIDC code exchange', exc_info=True)
+        return tokens
     
     def _refresh_token(self, code):
         """
         Get a new token by using a refresh_token
         DOES NOT VERIFY THE JWT!
         """
+        cache_key = f'{c.REDIS_PREFIX}oidc_refresh:{hashlib.sha256(code.encode()).hexdigest()}'
+        try:
+            cached = c.REDIS_STORE.get(cache_key)
+            if cached is not None:
+                return json.loads(cached) or None
+        except Exception:
+            log.warning('Could not read cached OIDC refresh result', exc_info=True)
+
         try:
             payload = {
                 'grant_type': 'refresh_token',
@@ -252,20 +341,34 @@ class OIDC(cherrypy.Tool):
                 'refresh_token': code
             }
 
-            response = requests.post(c.OIDC_TOKEN_ENDPOINT, data=payload)
-            response.raise_for_status()
-            return response.json()
-        except:
+            response = requests.post(c.OIDC_TOKEN_ENDPOINT, data=payload, timeout=OIDC_TIMEOUT)
+        except requests.RequestException:
             traceback.print_exc()
             return None
 
+        tokens = response.json() if response.ok else None
+        if not response.ok:
+            log.info(f'Keycloak refused a token refresh: {response.status_code} {response.text[:200]}')
+        if response.status_code < 500:
+            try:
+                c.REDIS_STORE.set(cache_key, json.dumps(tokens or {}), ex=REFRESH_RESULT_TTL)
+            except Exception:
+                log.warning('Could not cache OIDC refresh result', exc_info=True)
+        return tokens
+
     def handle_login(self, code=None, refresh_token=None, redirect_uri=c.OIDC_REDIRECT_URL, account_claim_token=None):
-        tokens = self._exchange_code_for_tokens(code, redirect_uri=redirect_uri)
-        if not tokens:
+        tokens = self._exchange_code_for_tokens(code, redirect_uri=redirect_uri) if code else None
+        if code and not tokens:
+            # Keycloak refused the authorization code: already used, expired, or its login
+            # session is gone. The callback handler uses this to recognize a replayed callback.
+            cherrypy.request.oidc_code_rejected = True
+        if not tokens and refresh_token:
             tokens = self._refresh_token(refresh_token)
         if not tokens:
             return "Login failed."
         claims = self._verify_token(tokens.get('id_token', None))
+        if not claims:
+            return "Login failed."
         sso_id = claims.get('sub', None)
         if not sso_id:
             return "No account ID provided. Please contact your developer."
@@ -277,9 +380,11 @@ class OIDC(cherrypy.Tool):
             if account_claim_token:
                 try:
                     with Session() as session:
-                        OIDC.process_account_claim_token(session, account_claim_token, sso_id)
-                    if cherrypy.request.attendee_account or cherrypy.request.admin_account:
-                        cherrypy.request.redirect_url = '../preregistration/homepage?message=Thank you for setting up your account!'
+                        attendee_account, admin_account = OIDC.process_account_claim_token(session, account_claim_token, sso_id)
+                        if attendee_account:
+                            success_message = f"You have successfully claimed \
+                                {'your badges' if len(attendee_account.valid_attendees) > 1 else 'your badge'}!"
+                            cherrypy.request.redirect_url = f'../preregistration/homepage?message={success_message}'
                 except ValueError as e:
                     return e
             else:
@@ -330,8 +435,19 @@ class OIDC(cherrypy.Tool):
 
         raise HTTPRedirect(c.OIDC_AUTH_ENDPOINT + params)
 
+    def clear_login_cookies(self):
+        for name in ('session_token', 'refresh_token'):
+            cherrypy.response.cookie[name] = ''
+            cherrypy.response.cookie[name]['path'] = '/'
+            cherrypy.response.cookie[name]['max-age'] = 0
+            cherrypy.response.cookie[name]['expires'] = 0
+
     def do_before_request(self):
         if not c.OIDC_ENABLED:
+            return
+
+        path = cherrypy.request.path_info
+        if path.startswith(NO_LOGIN_PATHS) or path in NO_LOGIN_FILES:
             return
         
         if 'state' in cherrypy.request.params:
@@ -348,7 +464,9 @@ class OIDC(cherrypy.Tool):
             return
         claims = self._verify_token(token)
         if refresh_token and not claims:
-            self.handle_login(refresh_token=refresh_token)
+            if self.handle_login(refresh_token=refresh_token):
+                # The refresh token is no good, drop it
+                self.clear_login_cookies()
         else:
             cherrypy.request.attendee_account = self._get_attendee_account_for_claims(claims)
             cherrypy.request.admin_account = self._get_admin_account_for_claims(claims)

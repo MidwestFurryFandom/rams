@@ -73,7 +73,7 @@ class BadgeExtras(MagForm):
     attendance_type = HiddenIntField('Single Day or Weekend Badge?')
     badge_type = HiddenIntField('Badge Type')
     badge_type_single = HiddenIntField('Badge Type', default=c.ATTENDEE_BADGE)
-    amount_extra = HiddenIntField('Pre-order Merch')
+    amount_extra = HiddenIntField('Pre-Order Merch')
     extra_donation = IntegerField('Extra Donation', widget=NumberInputGroup(),
                                   description=popup_link("../static_views/givingExtra.html", "Learn more"))
     shirt = SelectAvailableField('Shirt Size', coerce=int,
@@ -99,7 +99,7 @@ class BadgeExtras(MagForm):
 
 
 class AdminBadgeExtras(BadgeExtras):
-    amount_extra = SelectField('Pre-ordered Merch', coerce=int, choices=c.DONATION_TIER_OPTS)
+    amount_extra = SelectField('Pre-Ordered Merch', coerce=int, choices=c.DONATION_TIER_OPTS)
     extra_merch = StringField('Extra Merch')
     got_merch = BooleanField('This attendee has picked up their merch.')
     shirt_opt_out = SelectField('Shirt Opt In/Out', coerce=int, choices=c.SHIRT_OPT_OUT_OPTS)
@@ -166,6 +166,7 @@ class AdminStaffingInfo(StaffingInfo):
     agreed_to_volunteer_agreement = HiddenBoolField('Agreed to Volunteer Agreement')
     reviewed_emergency_procedures = HiddenBoolField('Reviewed Safety and Security Information')
     hotel_eligible = BooleanField('This staffer is eligible for staff crash space.')
+    imported_staff = BooleanField('This staffer was imported from a prior year or another event.')
 
     def staffing_label(self):
         return "This attendee is volunteering or staffing."
@@ -175,12 +176,6 @@ class AdminStaffingInfo(StaffingInfo):
 
 
 class PreregOtherInfo(OtherInfo, StaffingInfo):
-    dynamic_choices_fields = {'requested_depts_ids': lambda: [(v[0], v[1]) for v in c.PUBLIC_DEPARTMENT_OPTS_WITH_DESC]}
-
-    staffing = BooleanField('I am interested in volunteering!', widget=SwitchInput(),
-                            description=popup_link(c.VOLUNTEER_PERKS_URL, "What do I get for volunteering?"))
-    requested_depts_ids = SelectMultipleField('Where do you want to help?',
-                                              widget=MultiCheckbox())  # TODO: Show attendees department descriptions
     cellphone = TelField('Phone Number', description="A cellphone number is required for volunteers.", 
         render_kw={'placeholder': 'A phone number we can use to contact you during the event'})
     no_cellphone = BooleanField('I won\'t have a phone with me during the event.')
@@ -192,7 +187,7 @@ class PreregOtherInfo(OtherInfo, StaffingInfo):
 class Consents(MagForm):
     can_spam = BooleanField(
         f'Please send me emails relating to {c.EVENT_NAME} and {c.ORGANIZATION_NAME} in future years.',
-        description=popup_link("../static_views/privacy.html", "View Our Spam Policy"))
+        description=popup_link("../static_views/privacy.html", "Read our Email &amp; Text Communications policy"))
     pii_consent = BooleanField(
         Markup(f'<strong>Yes</strong>, I understand and agree that {c.ORGANIZATION_NAME} will store '
                'the personal information I provided above for the limited purposes '
