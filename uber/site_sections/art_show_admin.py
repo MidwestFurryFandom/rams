@@ -42,11 +42,14 @@ class Root:
     def form(self, session, new_app='', message='', **params):
         if new_app and 'attendee_id' in params:
             app = ArtShowApplication(attendee_id = params['attendee_id'])
-        else:
+        elif 'id' in params:
             app = session.get(ArtShowApplication, params['id'], options=[
                 selectinload(ArtShowApplication.art_show_pieces), joinedload(ArtShowApplication.active_receipt)])
             if cherrypy.request.method == 'POST' and params.get('id') not in [None, '', 'None']:
                 ReceiptManager.auto_update_receipt(session, app, app.active_receipt, params.copy())
+        else:
+            app = ArtShowApplication()
+
         attendee = None
         app_paid = 0 if new_app else app.amount_paid
 

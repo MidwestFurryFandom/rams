@@ -78,6 +78,9 @@ def no_mature_name_if_no_space(form, field):
         raise ValidationError('You cannot enter a banner name for the mature gallery without any space in the mature gallery.')
 
 
+AdminArtShowInfo.field_validation.validations['badge_status']['optional'] = validators.Optional()
+
+
 @AdminArtShowInfo.field_validation('overridden_price')
 def is_unset_or_number(form, field):
     if not field.data:
