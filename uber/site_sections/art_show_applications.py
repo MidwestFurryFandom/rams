@@ -276,7 +276,11 @@ class Root:
         }
 
     def mailing_address(self, session, message='', **params):
-        app = session.art_show_application(params)
+        app = session.art_show_application(params['id'])
+
+        forms = load_forms(params, app, ["ArtistMailingInfo"])
+        for form in forms.values():
+            form.populate_obj(app)
 
         if 'copy_address' in params:
             app.address1 = app.attendee.address1
