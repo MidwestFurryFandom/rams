@@ -50,7 +50,7 @@ class Root:
 
                 session.add(app)
                 EmailService.queue_email(session, 'new_art_show_app_admin', to=c.ART_SHOW_NOTIFICATIONS_EMAIL,
-                                         data={'app': app})
+                                         data={'app': app, 'app_name': app.attendee.full_name})
                 session.commit()
                 raise HTTPRedirect('confirmation?id={}', app.id)
 
@@ -323,7 +323,7 @@ class Root:
             message = 'Agent removed.'
             EmailService.queue_email(session, 'art_show_agent_removed',
                                      to=[old_code.attendee.email_to_address, app.attendee.email_to_address],
-                                     data={'app': app, 'agent': old_code.attendee})
+                                     data={'app_name': app.artist_or_full_name, 'agent_name': old_code.attendee.full_name})
 
         session.commit()
         session.refresh(app)
@@ -333,8 +333,7 @@ class Root:
             if page == 'edit':
                 message += f' Your new agent code is {new_code.code}.'
             else:
-                EmailService.queue_email(session, 'new_art_agent_code', app,
-                                         data={'agent_code': new_code})
+                EmailService.queue_email(session, 'new_art_agent_code', app, data={'agent_code': new_code})
 
         raise HTTPRedirect('{}?id={}&message={}', page, app.id, message)
     
