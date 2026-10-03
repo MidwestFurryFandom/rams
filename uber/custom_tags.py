@@ -49,6 +49,13 @@ def basename(s):
     return os.path.basename(s) if s else ''
 
 
+@JinjaEnv.jinja_filter(name='format_price')
+def format_price_filter(amount):
+    """A room rate as '$199' or '$199.50'; '' when unset."""
+    from uber.hotel.pricing import format_price
+    return format_price(amount)
+
+
 @JinjaEnv.jinja_test(name='class')
 def is_class(value):
     return inspect.isclass(value)
@@ -60,6 +67,17 @@ readable_join = JinjaEnv.jinja_filter(readable_join)
 @JinjaEnv.jinja_filter(name='datetime')
 def datetime_filter(dt, fmt='%-I:%M%p %Z on %A, %b %-e'):
     return '' if not dt else ' '.join(dt.strftime(fmt).split()).replace('AM', 'am').replace('PM', 'pm')
+
+
+@JinjaEnv.jinja_filter(name='date')
+def date_filter(d, fmt='%Y-%m-%d'):
+    """Format a `date` (or `datetime`) with strftime, returning '' for falsy
+    input. Use this for bare `date` columns (no timezone) - use
+    `datetime_local` for timezone-aware datetime rendering."""
+    if not d:
+        return ''
+    # `date.strftime` works directly; `datetime` instances also have it.
+    return d.strftime(fmt)
 
 
 @JinjaEnv.jinja_filter(name='datetime_local')

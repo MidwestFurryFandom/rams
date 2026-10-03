@@ -1363,6 +1363,24 @@ class Root:
                            "Started closeout for workstations matching ID(s) "
                            f"{params.get('workstation_ids')}.{extra_warning}")
 
+    @not_site_mappable
+    def create_sso_accounts(self, session, search_text='', order='last_first', invalid=''):
+        from uber.tasks.registration import create_sso_accounts
+        filter = Attendee.badge_status.in_([c.NEW_STATUS, c.COMPLETED_STATUS, c.WATCHED_STATUS])
+
+        search_text = search_text.strip()
+        if search_text:
+            attendees, error = session.search(search_text) if invalid else session.search(search_text, filter)
+
+        if error:
+            raise HTTPRedirect('../registration/index?search_text={}&order={}&invalid={}&message={}',
+                               search_text, order, invalid, error)
+        
+        create_sso_accounts.delay([attendee.id for attendee in attendees])
+
+        raise HTTPRedirect('../registration/index?search_text={}&order={}&invalid={}&message={}',
+                           search_text, order, invalid, 'Account creation started; this may take several minutes to complete.')
+
     @csv_file
     @not_site_mappable
     def attendee_search_export(self, out, session, search_text='', order='last_first', invalid=''):
@@ -1374,8 +1392,8 @@ class Root:
             attendees, error = session.search(search_text) if invalid else session.search(search_text, filter)
 
         if error:
-            raise HTTPRedirect('../registration/index?search_text={}&order={}&invalid={}&message={}'
-                               ).format(search_text, order, invalid, error)
+            raise HTTPRedirect('../registration/index?search_text={}&order={}&invalid={}&message={}'.format(
+                search_text, order, invalid, error))
         attendees = attendees.order(order)
 
         rows = devtools.prepare_model_export(Attendee, filtered_models=attendees)
@@ -1548,6 +1566,10 @@ class Root:
             if existing_import:
                 already_queued += 1
             else:
+                json_data = {'badge_type': badge_type, 'admin_notes': admin_notes,
+                             'badge_status': badge_status, 'full': True}
+                if params.get('comped', False):
+                    json_data['paid'] = c.NEED_NOT_PAY
                 import_job = ApiJob(
                     admin_id=admin_id,
                     admin_name=admin_name,
@@ -1555,8 +1577,7 @@ class Root:
                     target_server=target_server,
                     api_token=api_token,
                     query=id,
-                    json_data={'badge_type': badge_type, 'admin_notes': admin_notes,
-                               'badge_status': badge_status, 'full': True}
+                    json_data=json_data,
                 )
                 if len(attendee_ids) < 25:
                     TaskUtils.attendee_import(import_job)

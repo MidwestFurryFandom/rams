@@ -200,6 +200,9 @@ class BadgeInfo(MagModel, table=True):
 
 
 Index('ix_badge_info_attendee_id', BadgeInfo.attendee_id.desc())
+# Free badge numbers only; get_next_badge_num scans this instead of the whole table.
+Index('ix_badge_info_free_ident', BadgeInfo.ident,
+      postgresql_where=BadgeInfo.attendee_id == None, sqlite_where=BadgeInfo.attendee_id == None)  # noqa: E711
 
 
 class Attendee(MagModel, TakesPaymentMixin, table=True):
@@ -209,7 +212,8 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
     group_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='group.id', nullable=True)
     group: 'Group' = Relationship(back_populates="attendees", sa_relationship_kwargs={'foreign_keys': 'Attendee.group_id', 'lazy': 'select'})
     
-    badge_pickup_group_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='badge_pickup_group.id', nullable=True)
+    badge_pickup_group_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='badge_pickup_group.id', nullable=True,
+                                              index=True)
     badge_pickup_group: 'BadgePickupGroup' = Relationship(back_populates="attendees", sa_relationship_kwargs={'lazy': 'select'})
 
     creator_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='attendee.id', nullable=True)
@@ -257,7 +261,7 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
     first_name: str = ''
     last_name: str = ''
     legal_name: str = ''
-    email: str = ''
+    email: str = Field(default='', index=True)
     birthdate: date | None = None
     age_group: int | None = Field(sa_column=Column(Choice(c.AGE_GROUPS), nullable=True), default=c.AGE_UNKNOWN)
 
@@ -300,6 +304,7 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
     got_staff_merch: bool = False
     got_swadge: bool = False
     can_transfer: bool = False
+    imported_staff: bool = False
 
     reg_station: int | None
     registered: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
@@ -388,27 +393,27 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
     checklist_admin_depts: list['Department'] = Relationship(
         back_populates="checklist_admins",
         sa_relationship_kwargs={
-            'primaryjoin': 'and_(Department.id == DeptMembership.department_id, '
+            'primaryjoin': 'and_(Attendee.id == DeptMembership.attendee_id, '
                                 'DeptMembership.is_checklist_admin == True)',
             'secondary': 'dept_membership', 'viewonly': True, 'order_by': 'Department.name'})
     depts_with_inherent_role: list['Department'] = Relationship(
         back_populates="members_with_inherent_role",
         sa_relationship_kwargs={
-            'primaryjoin': 'and_(Department.id == DeptMembership.department_id, '
+            'primaryjoin': 'and_(Attendee.id == DeptMembership.attendee_id, '
                                 'DeptMembership.has_inherent_role)',
             'secondary': 'dept_membership',
             'order_by': 'Department.name', 'viewonly': True})
     can_admin_checklist_depts: list['Department'] = Relationship(
         back_populates="members_who_can_admin_checklist",
         sa_relationship_kwargs={
-            'primaryjoin': 'and_(Department.id == DeptMembership.department_id, '
+            'primaryjoin': 'and_(Attendee.id == DeptMembership.attendee_id, '
                                 'or_(DeptMembership.is_checklist_admin == True, '
                                     'DeptMembership.is_dept_head == True))',
             'secondary': 'dept_membership', 'viewonly': True, 'order_by': 'Department.name'})
     poc_depts: list['Department'] = Relationship(
         back_populates="pocs",
         sa_relationship_kwargs={
-            'primaryjoin': 'and_(Department.id == DeptMembership.department_id, '
+            'primaryjoin': 'and_(Attendee.id == DeptMembership.attendee_id, '
                                 'DeptMembership.is_poc == True)',
             'secondary': 'dept_membership', 'viewonly': True, 'order_by': 'Department.name'})
     explicitly_requested_depts: list['Department'] = Relationship(
@@ -474,16 +479,33 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
     indie_developer: 'IndieDeveloper' = Relationship(
         back_populates="attendee")
 
+    # The two ways a staffer can be given a room, tracked independently so an
+    # admin can grant or revoke either. hotel_eligible is the shared room
+    # (crash space) flag, signed up for through the external staff checklist;
+    # staff_lottery_eligible gates entry to the early staff lottery. A staffer
+    # may only end up with one actual room.
     hotel_eligible: bool = False
-    hotel_requests: 'HotelRequests' = Relationship(back_populates="attendee",
-                                                   sa_relationship_kwargs={'cascade': 'all,delete-orphan', 'passive_deletes': True})
-    room_assignments: list['RoomAssignment'] = Relationship(back_populates="attendee",
-                                                            sa_relationship_kwargs={'cascade': 'all,delete-orphan', 'passive_deletes': True})
+    staff_lottery_eligible: bool = True
+    # Hotel-facing legal name overrides. When set, these are the names the
+    # attendee wants written on the hotel reservation; otherwise the system
+    # falls back to the parsed `legal_first_name` / `legal_last_name`
+    # properties (which themselves fall back to `first_name` / `last_name`).
+    # Stored once at the attendee level so the same legal-name change
+    # propagates across every room they book or occupy.
+    hotel_first_name: str = ''
+    hotel_last_name: str = ''
     lottery_application: 'LotteryApplication' = Relationship(
         back_populates="attendee")
-
-    # The PIN/password used by third party hotel reservation systems
-    hotel_pin: str | None = Field(nullable=True, unique=True)
+    room_assignments: list['RoomAssignment'] = Relationship(
+        back_populates="attendee",
+        sa_relationship_kwargs={'cascade': 'all,delete-orphan',
+                                'passive_deletes': True,
+                                'foreign_keys': 'RoomAssignment.attendee_id'})
+    # Rooms this attendee sleeps in (occupant), as opposed to
+    # room_assignments, which they booked (booker / name on reservation).
+    occupied_rooms: list['RoomAssignment'] = Relationship(
+        back_populates="occupants",
+        sa_relationship_kwargs={'secondary': 'room_assignment_occupant'})
 
     # =========================
     # mits
@@ -569,6 +591,7 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
     _attendee_table_args: ClassVar = [
         Index('ix_attendee_paid_group_id', 'paid', 'group_id'),
         Index('ix_attendee_badge_status_badge_type', 'badge_status', 'badge_type'),
+        Index('ix_attendee_amount_extra_badge_status', 'amount_extra', 'badge_status'),
     ]
 
     __table_args__: ClassVar = tuple(_attendee_table_args)
@@ -583,9 +606,6 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
 
     @presave_adjustment
     def _misc_adjustments(self):
-        if not self.hotel_pin or not self.hotel_pin.strip():
-            self.hotel_pin = None
-
         if self.birthdate == '':
             self.birthdate = None
 
@@ -603,6 +623,8 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
 
         if self.birthdate:
             self.age_group = self.age_group_conf['val']
+            if self.age_now_or_at_con < 13:
+                self.can_spam = False
 
         for attr in ['first_name', 'last_name']:
             value = getattr(self, attr, '')
@@ -697,6 +719,10 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
 
         if self.badge_type == c.PSEUDO_DEALER_BADGE:
             self.ribbon = add_opt(self.ribbon_ints, c.DEALER_RIBBON)
+        
+        if self.badge_type == c.PSEUDO_UNDER_13_BADGE:
+            self.badge_type = c.CHILD_BADGE
+            self.ribbon = add_opt(self.ribbon_ints, c.UNDER_13)
 
         self.badge_type = self.badge_type_real
 
@@ -868,17 +894,16 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
 
     @presave_adjustment
     def child_badge(self):
-        if c.CHILD_BADGE in c.PREREG_BADGE_TYPES:
-            if self.age_now_or_at_con is not None and self.age_now_or_at_con < 18 \
-                    and self.badge_type == c.ATTENDEE_BADGE:
-                self.badge_type = c.CHILD_BADGE
-                self.session.update_badge(self)
-                if self.age_now_or_at_con < 13:
-                    self.ribbon = add_opt(self.ribbon_ints, c.UNDER_13)
+        if self.age_now_or_at_con is not None and self.age_now_or_at_con < 18 \
+                and self.badge_type == c.ATTENDEE_BADGE:
+            self.badge_type = c.CHILD_BADGE
+            self.session.update_badge(self)
+            if self.age_now_or_at_con < 13:
+                self.ribbon = add_opt(self.ribbon_ints, c.UNDER_13)
 
     @presave_adjustment
     def child_ribbon_or_not(self):
-        if c.CHILD_BADGE in c.PREREG_BADGE_TYPES:
+        if c.PSEUDO_UNDER_13_BADGE in c.PREREG_BADGE_TYPES:
             if self.age_now_or_at_con is not None and self.age_now_or_at_con < 13:
                 self.ribbon = add_opt(self.ribbon_ints, c.UNDER_13)
             elif c.UNDER_13 in self.ribbon_ints and self.age_now_or_at_con and self.age_now_or_at_con >= 13:
@@ -886,11 +911,10 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
 
     @presave_adjustment
     def child_to_attendee(self):
-        if c.CHILD_BADGE in c.PREREG_BADGE_TYPES:
-            if self.badge_type == c.CHILD_BADGE and self.age_now_or_at_con is not None and self.age_now_or_at_con >= 18:
-                self.badge_type = c.ATTENDEE_BADGE
-                self.session.update_badge(self)
-                self.ribbon = remove_opt(self.ribbon_ints, c.UNDER_13)
+        if self.badge_type == c.CHILD_BADGE and self.age_now_or_at_con is not None and self.age_now_or_at_con >= 18:
+            self.badge_type = c.ATTENDEE_BADGE
+            self.session.update_badge(self)
+            self.ribbon = remove_opt(self.ribbon_ints, c.UNDER_13)
 
     @property
     def art_show_receipt(self):
@@ -920,6 +944,7 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
 
     @property
     def access_sections(self):
+        from uber.models import AdminAccount
         """
         Returns what site sections an attendee 'belongs' to based on their properties.
         We use this list to determine which admins can create, edit, and view the attendee.
@@ -927,10 +952,10 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
         section_list = []
         if self.staffing_or_will_be:
             section_list.append('shifts_admin')
-        if (self.group and self.group.guest and self.group.guest.group_type in [c.BAND, c.ROCK_ISLAND, c.SIDE_STAGE]) \
+        if (self.group and self.group.guest and self.group.guest.group_type in AdminAccount.checklist_access_matrix['band_admin']) \
                 or (self.badge_type == c.GUEST_BADGE and c.BAND in self.ribbon_ints):
             section_list.append('band_admin')
-        if (self.group and self.group.guest and self.group.guest.group_type not in [c.BAND, c.SIDE_STAGE, c.MIVS]) \
+        if (self.group and self.group.guest and self.group.guest.group_type in AdminAccount.checklist_access_matrix['guest_admin']) \
                 or (self.badge_type == c.GUEST_BADGE and c.BAND not in self.ribbon_ints):
             section_list.append('guest_admin')
         if c.PANELIST_RIBBON in self.ribbon_ints:
@@ -1534,7 +1559,7 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
         if self.managers:
             return self.managers[0].id
         if c.ATTENDEE_ACCOUNTS_ENABLED:
-            log.error(f"Tried to find a purchaser ID for {self.id}, but there is no account ID available. Attendee ID used as fallback.")
+            log.info(f"Tried to find a purchaser ID for {self.id}, but there is no account ID available. Attendee ID used as fallback.")
         return self.id
 
     @hybrid_property
@@ -1669,7 +1694,8 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
             and not self.dept_memberships_with_inherent_role \
             and (not self.art_show_application or not self.art_show_application.is_valid) \
             and (not self.art_agent_apps or not any(app.is_valid for app in self.art_agent_apps)) \
-            and (not self.lottery_application or self.lottery_application.status not in self.dq_lottery_statuses)
+            and (not self.lottery_application or self.lottery_application.status not in self.dq_lottery_statuses) \
+            and not self.room_assignments
 
     @property
     def transferable_actions(self):
@@ -1678,6 +1704,8 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
 
         if self.lottery_application and self.lottery_application.status == c.COMPLETE:
             can_do.append("withdraw your hotel lottery entry")
+        if self.room_assignments:
+            can_do.append("cancel or leave your hotel room")
         if self.art_show_application and self.art_show_application.is_valid:
             can_do.append(f"contact {email_only(c.ART_SHOW_EMAIL)} to cancel your art show application")
         if self.art_agent_apps and any(app.is_valid for app in self.art_agent_apps):
@@ -1704,6 +1732,8 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
                                readable_join(self.get_labels_for_memberships('dept_memberships_with_role'))))
         if self.lottery_application and self.lottery_application.status in self.dq_lottery_statuses:
             reasons.append(f"they have a {self.lottery_application.status_label.lower()} hotel lottery application")
+        if self.room_assignments:
+            reasons.append("they have a hotel room assignment")
         return reasons
 
     @presave_adjustment
@@ -1791,8 +1821,24 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
 
     @property
     def donation_swag(self):
-        donation_items = [
-            desc for amount, desc in sorted(c.DONATION_TIERS.items()) if amount and (self.amount_extra or 0) >= amount]
+        from uber.custom_tags import format_currency
+
+        donation_items = []
+        highest_tier_listed = False
+
+        for amount, desc in sorted(c.DONATION_TIERS.items(), reverse=True):
+            if amount and self.amount_extra >= amount:
+                if not highest_tier_listed:
+                    if c.MERCH_TAX:
+                        tax = c.get_amount_extra_tax(self.amount_extra)
+                        donation_items.append(f'{format_currency(self.amount_extra + tax)} {c.DONATION_TIERS[self.amount_extra]} \
+                                              (Includes {format_currency(self.amount_extra)} base price + {format_currency(tax)} Sales Tax)')
+                    else:
+                        donation_items.append(f"${amount} {desc}")
+                    highest_tier_listed = True
+                else:
+                    donation_items.append(f"{desc} (Included)")
+
         extra_donations = ['Extra donation of ${}'.format(self.extra_donation)] if self.extra_donation else []
         return donation_items + extra_donations
 
@@ -1932,6 +1978,14 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
     @property
     def takes_shifts(self):
         return bool(self.staffing and self.badge_type != c.CONTRACTOR_BADGE)
+    
+    @property
+    def shift_signups_start(self):
+        return c.SHIFTS_CREATED if self.badge_type == c.STAFF_BADGE else c.VOLUNTEER_SIGNUPS_START
+    
+    @property
+    def shift_signups_available(self):
+        return localized_now() > self.shift_signups_start
 
     @property
     def handles_cash(self):
@@ -2086,6 +2140,10 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
         self._set_relation_ids('assigned_depts', Department, list(values))
 
     @property
+    def requestable_public_depts(self):
+        return [(v[0], v[1]) for v in c.PUBLIC_DEPARTMENT_OPTS_WITH_DESC if v[0] not in self.assigned_depts_ids]
+
+    @property
     def requested_depts_ids(self):
         return [d.department_id or 'All' for d in self.dept_membership_requests]
 
@@ -2167,16 +2225,16 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
             return False
         return any(m.department_id == department_id for m in self.dept_memberships)
 
-    def trusted_in(self, department):
-        return self.has_role_in(department)
+    def trusted_in(self, department_id):
+        return self.has_role_in(department_id)
 
     def can_admin_dept_for(self, department):
         return (self.admin_account and self.admin_account.full_dept_admin) \
             or self.has_inherent_role_in(department)
 
-    def can_dept_head_for(self, department):
+    def can_dept_head_for(self, department_id):
         return (self.admin_account and self.admin_account.full_dept_admin) \
-            or self.is_dept_head_of(department)
+            or self.is_dept_head_of(department_id)
 
     def can_admin_shifts_for(self, department_id):
         if not department_id:
@@ -2336,73 +2394,32 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
             self.hotel_eligible = True
 
     @property
-    def hotel_shifts_required(self):
-        return bool(c.VOLUNTEER_CHECKLIST_OPEN and self.hotel_nights and not self.is_dept_head and self.takes_shifts)
-
-    @property
-    def setup_hotel_approved(self):
-        requests = self.hotel_requests
-        return bool(requests and requests.approved and set(requests.nights_ints).intersection(c.SETUP_NIGHTS))
-
-    @property
-    def teardown_hotel_approved(self):
-        requests = self.hotel_requests
-        return bool(
-            requests
-            and requests.approved
-            and set(requests.nights_ints).intersection(c.TEARDOWN_NIGHTS))
-
-    @property
     def shift_prereqs_complete(self):
         if not c.PRE_CON:
             return not self.placeholder and (
                 not c.VOLUNTEER_AGREEMENT_ENABLED or self.agreed_to_volunteer_agreement) and (
                 not c.EMERGENCY_PROCEDURES_ENABLED or self.reviewed_emergency_procedures) \
-                and c.AFTER_SHIFTS_CREATED
+                and self.shift_signups_available
 
         return not self.placeholder and self.food_restrictions_filled_out and self.shirt_info_marked and (
-            not self.hotel_eligible
-            or self.hotel_requests
-            or not c.BEFORE_ROOM_DEADLINE
-            or not c.HOTELS_ENABLED
-            or c.HOTEL_REQUESTS_URL) and (
             not c.VOLUNTEER_AGREEMENT_ENABLED or self.agreed_to_volunteer_agreement) and (
             not c.EMERGENCY_PROCEDURES_ENABLED or self.reviewed_emergency_procedures) and (
             not c.CASH_HANDLING_URL or not self.handles_cash or self.reviewed_cash_handling) \
-            and c.AFTER_SHIFTS_CREATED
+            and self.shift_signups_available
 
     @property
-    def hotel_nights(self):
-        try:
-            return self.hotel_requests.nights
-        except Exception:
-            return []
+    def shift_compliance_violations(self):
+        """List of NightShiftRequirement rows this staffer is failing.
+
+        Driven by the per-date rules configured on the Staff Rooming admin
+        page. Empty list means compliant (or no room assignment / no rules).
+        """
+        from uber.shift_compliance import compliance_violations
+        return compliance_violations(self)
 
     @property
-    def hotel_nights_without_shifts_that_day(self):
-        if not self.hotel_requests:
-            return []
-
-        hotel_nights = set(self.hotel_requests.nights_ints)
-        shift_nights = set()
-        for shift in self.shifts:
-            start_time = shift.job.start_time.astimezone(c.EVENT_TIMEZONE)
-            shift_night = getattr(c, start_time.strftime('%A').upper())
-            shift_nights.add(shift_night)
-        discrepancies = hotel_nights.difference(shift_nights)
-        return list(sorted(discrepancies, key=c.NIGHT_DISPLAY_ORDER.index))
-
-    @cached_property
-    def hotel_status(self):
-        hr = self.hotel_requests
-        if not hr:
-            return 'Has not filled out volunteer checklist'
-        elif not hr.nights:
-            return 'Declined hotel space'
-        elif hr.setup_teardown:
-            return 'Hotel nights: {} ({})'.format(hr.nights_display, 'approved' if hr.approved else 'not yet approved')
-        else:
-            return 'Hotel nights: ' + hr.nights_display
+    def is_shift_compliant(self):
+        return not self.shift_compliance_violations
 
     @property
     def hotel_lottery_ineligible_reason(self):
@@ -2425,12 +2442,70 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
 
     @hotel_lottery_eligible.expression
     def hotel_lottery_eligible(cls):
+        # Must exclude the same statuses as the Python property above -
+        # the solver pool and exports query through this expression, and a
+        # mismatch lets an attendee win a room the property says they
+        # can't hold.
         return and_(cls.is_valid == True, cls.is_unassigned == False, cls.placeholder == False,
-                    not_(cls.badge_status.in_([c.REFUNDED_STATUS, c.NOT_ATTENDING, c.DEFERRED_STATUS])))
+                    not_(cls.badge_status.in_([c.REFUNDED_STATUS, c.NOT_ATTENDING,
+                                               c.DEFERRED_STATUS, c.WATCHED_STATUS])))
 
     @property
     def staff_hotel_lottery_eligible(self):
-        return self.badge_type == c.STAFF_BADGE
+        """The single gate on entering the staff lottery: every entry path,
+        room-group ownership, and staff pricing reads this."""
+        return self.badge_type == c.STAFF_BADGE and self.staff_lottery_eligible and self.hotel_lottery_eligible
+
+    @property
+    def hotel_room_kind(self):
+        """Which kind of provided room this attendee actually holds:
+        '' (none), 'lottery', 'shared', 'other', or 'mixed'.
+
+        A staffer may take a room through the lottery or through the shared
+        room signup, but not both, so the eligibility page needs to show which
+        one happened rather than just yes or no.
+        """
+        kinds = set()
+        for ra in self.active_room_assignments:
+            if ra.lottery_run_id or ra.assignment_reason == c.LOTTERY_AWARD:
+                kinds.add('lottery')
+            elif ra.assignment_reason in (c.STAFF_AUTO, c.PARTITION_GRANT):
+                kinds.add('shared')
+            else:
+                kinds.add('other')
+        if not kinds:
+            return ''
+        if len(kinds) > 1:
+            return 'mixed'
+        return kinds.pop()
+
+    @property
+    def active_room_assignments(self):
+        """RoomAssignments this attendee booked that still hold inventory
+        (not cancelled / expired / removed). The list every "does this
+        person have a room?" check should use."""
+        return [ra for ra in (self.room_assignments or []) if ra.is_live]
+
+    @property
+    def hotel_status(self):
+        """Compact summary of this attendee's live rooms for inline admin
+        display, e.g. "2 rooms: 1 secured, 1 awaiting card". Empty string
+        when they hold no live rooms."""
+        live = self.active_room_assignments
+        if not live:
+            return ''
+        secured = sum(1 for ra in live if ra.status == c.SECURED)
+        needs_card = sum(1 for ra in live if ra.needs_card)
+        other = len(live) - secured - needs_card
+        parts = []
+        if secured:
+            parts.append(f'{secured} secured')
+        if needs_card:
+            parts.append(f'{needs_card} awaiting card')
+        if other:
+            parts.append(f'{other} assigned')
+        noun = 'room' if len(live) == 1 else 'rooms'
+        return f'{len(live)} {noun}: ' + ', '.join(parts)
 
     @property
     def legal_first_name(self):
@@ -2508,6 +2583,22 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
             elif ' ' in legal_name:
                 return legal_name.split(' ', 1)[1]
         return self.last_name
+
+    @property
+    def effective_hotel_first_name(self):
+        """The name to register on hotel reservations.
+
+        Prefers the attendee's explicit `hotel_first_name` (the hotel
+        legal-name override they entered through the lottery flow);
+        otherwise falls back to the parsed `legal_first_name` (which
+        itself falls back to `first_name`).
+        """
+        return self.hotel_first_name or self.legal_first_name
+
+    @property
+    def effective_hotel_last_name(self):
+        """Last-name companion to `effective_hotel_first_name`."""
+        return self.hotel_last_name or self.legal_last_name
 
     # =========================
     # attractions
@@ -2590,7 +2681,7 @@ attendee_attendee_account = Table(
 
 class AttendeeAccount(MagModel, table=True):
     public_id: str | None = Field(sa_type=Uuid(as_uuid=False), default_factory=lambda: str(uuid4()), nullable=True)
-    owner_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='attendee.id', nullable=True)
+    owner_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='attendee.id', ondelete='SET NULL', nullable=True)
     owner: 'Attendee' = Relationship(sa_relationship=relationship('Attendee', foreign_keys='AttendeeAccount.owner_id',
                                                                    lazy='select', post_update=True))
     email: str = ''
@@ -2709,7 +2800,9 @@ class AttendeeAccount(MagModel, table=True):
     
     @property
     def hotel_eligible_staff(self):
-        return any([a.badge_type == c.STAFF_BADGE for a in self.hotel_eligible_attendees])
+        # Since this is used to display whether the staff lottery is open, we need to include placeholder badges
+        return [a for a in self.valid_attendees if a.badge_type == c.STAFF_BADGE and not a.is_unassigned and 
+                a.badge_status not in [c.REFUNDED_STATUS, c.NOT_ATTENDING, c.DEFERRED_STATUS, c.WATCHED_STATUS]]
 
     @property
     def valid_attendees(self):
@@ -2782,6 +2875,11 @@ class AttendeeAccount(MagModel, table=True):
         return [attendee for attendee in self.attendees
                 if attendee.badge_status in [c.REFUNDED_STATUS, c.DEFERRED_STATUS]
                 and not attendee.current_attendee]
+
+
+# Index normalized_email for basic search performance gains
+Index('ix_attendee_account_normalized_email', func.replace(func.lower(func.trim(AttendeeAccount.email)), '.', ''))
+Index('ix_attendee_account_sso_id', AttendeeAccount.sso_id)
 
 
 class BadgePickupGroup(MagModel, table=True):
