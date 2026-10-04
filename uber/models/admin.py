@@ -37,7 +37,7 @@ class AdminAccount(MagModel, table=True):
     attendee: 'Attendee' = Relationship(back_populates="admin_account", sa_relationship_kwargs={'lazy': 'joined'})
 
     hashed: str = Field(sa_type=String, private=True)
-    sso_id: str = ''
+    sso_id: str = Field(default='', index=True)
     last_signed_in: str | None = Field(sa_type=DateTime(timezone=True), nullable=True, default=None)
 
     access_groups: list['AccessGroup'] = Relationship(
@@ -63,6 +63,19 @@ class AdminAccount(MagModel, table=True):
         back_populates="admin_account")
 
     email_model_name: ClassVar = 'account'
+
+    # Per-partition lottery permissions. Granted by hotel-lottery admins to
+    # partition-owning departments (Marketplace, Belvedere, Panels, ADA, etc.).
+    # See uber/models/hotel.py:PartitionOwner.
+    partition_grants: list['PartitionOwner'] = Relationship(
+        back_populates="admin_account",
+        sa_relationship_kwargs={'cascade': 'all,delete-orphan', 'passive_deletes': True})
+
+    # When True, this account can see attendees' legal names within the
+    # partitions it owns (a PartitionOwner grant on that partition is still
+    # required); it has no effect outside those partitions. Global lottery
+    # admins see legal names everywhere regardless of this flag.
+    view_guest_legal_names: bool = False
 
     def __repr__(self):
         return f"<Admin full_name='{self.attendee.full_name}'>"
@@ -96,6 +109,17 @@ class AdminAccount(MagModel, table=True):
         except Exception:
             return None
         
+    @staticmethod
+    def acting_name():
+        """The name changes should be attributed to: the portal user an API
+        method stashed on the request, or the logged-in admin or kiosk
+        volunteer otherwise. The 'api:' prefix marks the attribution as
+        coming from an API client rather than a session."""
+        api_user = getattr(cherrypy.request, 'api_acting_user', '')
+        if api_user:
+            return f'api:{api_user}'
+        return AdminAccount.admin_or_volunteer_name()
+
     @staticmethod
     def supervisor_name():
         try:
@@ -132,6 +156,14 @@ class AdminAccount(MagModel, table=True):
     @classproperty
     def _extra_apply_attrs(cls):
         return set(['access_groups_ids'])
+    
+    @classproperty
+    def checklist_access_matrix(self):
+        return {
+            'guest_admin': [g_type for g_type in c.GROUP_TYPES if g_type not in ([c.BAND, c.SIDE_STAGE, c.MIVS])],
+            'band_admin': [c.BAND, c.ROCK_ISLAND, c.SIDE_STAGE],
+            'showcase_admin': [c.MIVS],
+        }
 
     @property
     def full_access_set(self):
@@ -186,10 +218,11 @@ class AdminAccount(MagModel, table=True):
 
     @property
     def viewable_guest_group_types(self):
-        if 'guest_admin' in self.read_or_write_access_set:
-            return [opt for opt in c.GROUP_TYPE_VARS if opt.lower() + "_admin"
-                    in self.read_or_write_access_set or opt.lower() + "_admin" not in c.ADMIN_PAGES]
-        return [opt for opt in c.GROUP_TYPE_VARS if opt.lower() + "_admin" in self.read_or_write_access_set]
+        group_types = []
+        for access_name in self.checklist_access_matrix.keys():
+            if access_name in self.read_or_write_access_set:
+                group_types.extend(self.checklist_access_matrix[access_name])
+        return group_types
 
     @property
     def is_super_admin(self):

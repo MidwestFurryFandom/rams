@@ -99,7 +99,6 @@ def save_attendee(session, attendee, params):
 
     return message
 
-
 def create_new_account(session, attendee):
     new_account = session.create_attendee_account(attendee.email)
     session.add(new_account)
@@ -139,13 +138,15 @@ class Root:
         count = 0
         search_text = search_text.strip()
         if search_text:
-            search_results, message = session.search(search_text, *filter)
+            search_results, error = session.search(search_text, *filter)
             if search_results and search_results.count():
                 attendees = search_results
                 count = attendees.count()
                 if count == total_count:
                     message = 'Every{} attendee matched this search.'.format('' if invalid else ' valid')
-            elif not message:
+            elif error:
+                message = error
+            else:
                 message = 'No matches found.{}'.format(
                     '' if invalid else ' Try showing all badges to expand your search.')
         if not count:
@@ -374,20 +375,23 @@ class Root:
     
     @ajax
     @attendee_view
-    def add_existing_account(self, session, id, account_id, email=False, **params):
+    def add_existing_account(self, session, id, account_id, email='false', **params):
         attendee = session.attendee(id)
         account = session.attendee_account(account_id)
+        email = json.loads(email)
         if attendee.managers:
             return {'success': False, 'message': "This attendee already has an account."}
+        if attendee.admin_account and account.admin_account_id:
+            return {'success': False, 'message': "This account already has an attendee with admin access."}
         session.add_attendee_to_account(attendee, account)
         if attendee.group and attendee.id == attendee.group.leader_id:
             for group_member in attendee.group.attendees:
-                if not group_member.is_unassigned and group_member != attendee:
+                if not group_member.is_unassigned and not group_member.managers and group_member != attendee:
                     session.add_attendee_to_account(group_member, account)
-        session.commit()
         if email:
             EmailService.queue_email(session, 'attendee_account_attendee_added', account,
                                      data={'attendee': attendee})
+        session.commit()
         return {'success': True,
                 'message': f"Attendee added to account {account.email}{' and the account owner has been notified' if email else ''}!"}
             
@@ -683,16 +687,15 @@ class Root:
             'pageviews': session.query(PageViewTracking).filter(PageViewTracking.which == repr(attendee)
                                                                 ).order_by(PageViewTracking.when).all(),
         }
-    
+
     @log_pageview
     def emails(self, session, id):
         attendee = session.attendee(id, allow_invalid=True)
         return {
             'attendee':  attendee,
             'emails': session.query(Email).filter(Email.fk_id == id).order_by(Email.generated).all(),
-            'other_emails': session.query(Email).filter(Email.to == attendee.email,
+            'other_emails': session.query(Email).filter(Email.to.icontains(attendee.email),
                                                         Email.fk_id != id).order_by(Email.generated).all(),
-            'depts_by_sender': EmailService.emails_from_depts(session),
         }
 
     def delete(self, session, id, return_to='index?', return_msg=False, **params):
@@ -1622,7 +1625,7 @@ class Root:
             'attendee': attendee,
             'emails': session.query(Email).filter(Email.model == 'Attendee',
                                                   Email.fk_id == id).order_by(Email.generated).all(),
-            'other_emails': session.query(Email).filter(Email.to == attendee.email,
+            'other_emails': session.query(Email).filter(Email.to.icontains(attendee.email),
                                                         Email.fk_id != id).order_by(Email.generated).all(),
         }
 

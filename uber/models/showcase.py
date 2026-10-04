@@ -168,6 +168,18 @@ class IndieStudio(MagModel, table=True):
 
     email_model_name: ClassVar = 'studio'
 
+    def __getattr__(self, name):
+        """
+        Allows passthrough of Guest checklist status items
+        """
+        if name.endswith('_status'):
+            status_name = name.split('_status')[0]
+            if status_name not in c.MIVS_CHECKLIST:
+                return getattr(self.group.guest, name) if self.group and self.group.guest else "Status Not Found!"
+            return self.status(name.rsplit('_', 1)[0])
+        else:
+            return super(IndieStudio, self).__getattr__(name)
+
     @property
     def primary_contact_first_names(self):
         if not self.primary_contacts:
@@ -241,6 +253,8 @@ class IndieStudio(MagModel, table=True):
 
     @property
     def hotel_space_status(self):
+        if self.group.guest and not self.group.guest.hotel_included:
+            return "Does not receive hotel space"
         if self.needs_hotel_space is not None:
             return "Requested hotel space for {} with email {}".format(self.name_for_hotel, self.email_for_hotel)\
                 if self.needs_hotel_space else "Opted out"
@@ -250,6 +264,9 @@ class IndieStudio(MagModel, table=True):
         return "Completed" if self.show_info_updated else None
 
     def checklist_deadline(self, slug):
+        if slug not in c.MIVS_CHECKLIST:
+            return self.group.guest.deadline_from_model(slug)
+
         default_deadline = c.MIVS_CHECKLIST[slug]['deadline']
         if self.group and self.group.registered >= default_deadline and slug in ['core_hours', 'discussion']:
             return self.group.registered + timedelta(days=7)
@@ -265,7 +282,7 @@ class IndieStudio(MagModel, table=True):
         Returns: A timedelta object representing how far from the deadline this team is for a particular checklist item
 
         """
-        return localized_now() - self.checklist_deadline(slug)
+        return localized_now() - self.checklist_deadline(slug) if self.checklist_deadline(slug) else False
 
     @property
     def checklist_items_due_soon_grouped(self):
@@ -429,6 +446,7 @@ class IndieGame(MagModel, ReviewMixin, table=True):
     registered: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
     waitlisted: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
     accepted: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
+    hotel_included: bool = True
 
     codes: list['IndieGameCode'] = Relationship(
         back_populates="game", sa_relationship_kwargs={'lazy': 'selectin', 'cascade': 'all,delete-orphan', 'passive_deletes': True})
@@ -446,6 +464,10 @@ class IndieGame(MagModel, ReviewMixin, table=True):
     def waitlisted_time(self):
         if self.status == c.WAITLISTED and not self.waitlisted:
             self.waitlisted = datetime.now(UTC)
+
+    @property
+    def attendee_account(self):
+        return self.studio.attendee_account if self.studio else None
 
     @property
     def email(self):

@@ -239,21 +239,32 @@ class DateTimePicker(TextInput):
 class HourMinuteDuration(HiddenInput):
     def __call__(self, field, **kwargs):
         id = kwargs.pop('id', field.id)
+
+        outer_model = (
+                kwargs.get('x-model.number')
+                or kwargs.get('x-model')
+                or kwargs.get('alpine_model')
+        )
+        model_binding = f'x-model.number="{outer_model}"' if outer_model else ''
+
         duration = int(field.data) if field.data else 0
         hours, minutes = int(duration / 60), int(duration % 60)
         html = f"""
         <div x-data="{{
             hours: {hours},
             minutes: {minutes},
-            getTotal() {{ return parseInt(this.hours) * 60 + parseInt(this.minutes) }},
-            }}">
+            total: { duration }
+            }}"
+            x-effect="total = parseInt(hours) * 60 + parseInt(minutes)"
+            x-modelable="total"
+            {model_binding}>
             <div class="input-group">
                 <input type="number" x-model="hours" class="form-control" onfocus="this.select();" name="{field.name}_hours" placeholder="# hours" value="{hours}" />
                 <span class="input-group-text">hours,</span>
                 <input type="number" x-model="minutes" class="form-control" onfocus="this.select();" name="{field.name}_minutes" placeholder="# minutes" value="{minutes}" />
                 <span class="input-group-text">minutes</span>
             </div>
-            <input type="hidden" name="{field.name}" id="{id}" value={duration} x-bind:value="getTotal">
+            <input type="hidden" name="{field.name}" id="{id}" value={duration} x-bind:value="total" />
         </div>"""
         return Markup(html)
 
@@ -340,10 +351,11 @@ class Ranking():
         #              description (text), description_right (right-aligned text), footnote (form-text text)
         extra_info = []
         if choice_item.get('price'):
-            price_str = f"{choice_item['price']}"
-            if show_staff_rates and choice_item.get('staff_price'):
-                price_str = price_str + f"/{choice_item['staff_price']}"
-            extra_info.append(f"""<h5 class="card-subtitle mb-2 text-muted">{price_str}</h5>""")
+            # Filled with a computed stay total by the hotel lottery's pricing
+            # script; stays hidden when no total is calculable, so a nightly
+            # rate is never shown as though it were a total.
+            extra_info.append(
+                """<h5 class="card-subtitle mb-2 text-muted ranking-price" hidden></h5>""")
         if choice_item.get('description') or choice_item.get('description_right'):
             extra_info.append("""<div class="card-text">""")
             if choice_item.get('description'):
@@ -356,7 +368,17 @@ class Ranking():
         return extra_info
     
     def __call__(self, field, choices=None, show_staff_rates=False, **kwargs):
-        choices = choices or self.choices or [('', {"name": "Error", "description": "No choices are configured"})]
+        # Resolve choices in precedence order: an explicit `choices=` kwarg
+        # passed at render time; then whatever bind_field wrote onto the
+        # field, which is where `dynamic_choices_fields` lands its live DB
+        # lookup (`_hotel_ranking_choices` etc.); then the widget's own
+        # `self.choices` for callers that hand a list to the constructor;
+        # and finally an error placeholder.
+        field_choices = getattr(field, 'choices', None)
+        choices = (choices
+                   or (field_choices if field_choices else None)
+                   or self.choices
+                   or [('', {"name": "Error", "description": "No choices are configured"})])
         id = kwargs.pop('id', field.id) or "ranking"
         selected_choices = field.data if isinstance(field.data, list) else [str(field.data)]
         read_only = 'readonly' in kwargs and kwargs['readonly']
@@ -411,28 +433,33 @@ class Ranking():
             SortableExt.initWidget('{id}', 'li.sortable-item');
         </script>"""
 
-        if read_only:
-            html = []
-        else:
-            html = ['<div class="row">']
-
-        html.extend([
+        # Column order: in editable mode "Available" sits on the left
+        # and "Selected" on the right - selected items are the "result"
+        # of the user's actions, and the natural left-to-right reading
+        # order makes Available -> Selected feel like a pick-and-move
+        # workflow. In read-only mode there is no "Available" column,
+        # so Selected just renders alone.
+        selected_block = [
             '<div class="col-sm-6">',
-            f'<span class="form-text">{'' if read_only else 'Selected '}{field.label.text}</span>',
+            f'<span class="form-text">{"" if read_only else "Selected "}{field.label.text}</span>',
             f'<ul class="card card-body bg-light gap-2 p-2 p-sm-3" id="selected_{id}">',
             *selected_html,
             f'</ul></div>',
-            ])
+        ]
 
-        if not read_only:
-            html.extend([
+        if read_only:
+            html = list(selected_block)
+        else:
+            html = [
+                '<div class="row">',
                 '<div class="col-sm-6">',
                 f'<span class="form-text">Available {field.label.text}</span>',
                 f'<ul class="card card-body bg-light gap-2 p-2 p-sm-3" id="deselected_{id}">',
                 *deselected_html,
                 '</ul></div>',
+                *selected_block,
                 script,
                 '</div>',
-                ])
+            ]
 
         return Markup(''.join(html))

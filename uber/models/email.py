@@ -2,6 +2,7 @@ import re
 import traceback
 import logging
 import pytz
+import json
 from collections import OrderedDict
 from datetime import datetime, timedelta
 from dateutil import parser as dateparser
@@ -106,9 +107,20 @@ class AutomatedEmail(MagModel, BaseEmailMixin, table=True):
         if not self.default_policy:
             self.default_policy = None
 
+    @property
+    def can_generate(self):
+        # Similar to filters_for_allowed, but allows action-based emails get generated
+        now = utils.localized_now()
+        return self.policy != c.DISABLED and (
+            not c.AT_THE_CON or self.allow_at_the_con) and (
+            not c.POST_CON or self.allow_post_con) and (
+            not self.active_before or self.active_before > now)
+
     @classproperty
     def filters_for_allowed(cls):
-        allowed = [cls.policy != None, cls.policy != c.DISABLED]
+        now = utils.localized_now()
+        allowed = [cls.policy != None, cls.policy != c.DISABLED,
+                   or_(cls.active_before == None, cls.active_before >= now)]
         if c.AT_THE_CON:
             return allowed + [cls.allow_at_the_con == True]  # noqa: E712
         if c.POST_CON:
@@ -119,8 +131,7 @@ class AutomatedEmail(MagModel, BaseEmailMixin, table=True):
     def filters_for_active(cls):
         now = utils.localized_now()
         return cls.filters_for_allowed + [
-            or_(cls.active_after == None, cls.active_after <= now),  # noqa: E711
-            or_(cls.active_before == None, cls.active_before >= now)]  # noqa: E711
+            or_(cls.active_after == None, cls.active_after <= now)]  # noqa: E711
 
     @staticmethod
     def reconcile_fixtures():
@@ -183,14 +194,6 @@ class AutomatedEmail(MagModel, BaseEmailMixin, table=True):
         elif self.active_before:
             return 'before {}'.format(self.active_before.strftime(fmt))
         return ''
-    
-    @property
-    def can_generate(self):
-        now = utils.localized_now()
-        return self.policy != c.DISABLED and (
-            not c.AT_THE_CON or self.allow_at_the_con) and (
-            not c.POST_CON or self.allow_post_con) and (
-            not self.active_before or self.active_before > now)
 
     @cached_property
     def emails_by_fk_id(self):
@@ -252,8 +255,10 @@ class AutomatedEmail(MagModel, BaseEmailMixin, table=True):
 
         if self.fixture:
             data.update(self.fixture.extra_data)
+        
+        for key, val in render_data.items():
+            data[key] = json.loads(val)
 
-        data.update(render_data)
         return renderable_data(data)
 
     def render_body(self, model_instance=None, render_data={}):
@@ -274,7 +279,7 @@ class Email(MagModel, BaseEmailMixin, table=True):
     automated_email_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='automated_email.id', nullable=True, index=True)
     automated_email: 'AutomatedEmail' = Relationship(back_populates="emails", sa_relationship_kwargs={'lazy': 'joined'})
 
-    fk_id: str | None = Field(sa_type=Uuid(as_uuid=False), nullable=True)
+    fk_id: str | None = Field(sa_type=Uuid(as_uuid=False), nullable=True, index=True)
     ident: str = ''
     to: str = ''
     render_data: dict[str, Any] = Field(sa_type=JSON, default_factory=dict)

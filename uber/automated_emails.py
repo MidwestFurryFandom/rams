@@ -12,7 +12,8 @@ from uber import decorators
 from uber.jinja import JinjaEnv
 from uber.models import (AdminAccount, Attendee, AttendeeAccount, ArtShowApplication, ArtShowBidder, AutomatedEmail, AttractionSignup, Department,
                          Email, Group, GuestGroup, IndieGame, IndieJudge, IndieStudio, ArtistMarketplaceApplication, MITSTeam,
-                         MITSApplicant, ReceiptInfo, PanelApplication, PanelApplicant, PromoCode, PromoCodeGroup, Room, RoomAssignment, LotteryApplication, Shift)
+                         MITSApplicant, ReceiptInfo, PanelApplication, PanelApplicant, PromoCode, PromoCodeGroup, LotteryApplication,
+                         RoomAssignment, Shift)
 from uber.utils import after, before, days_after, days_before, days_between, localized_now, DeptChecklistConf
 
 log = logging.getLogger(__name__)
@@ -35,7 +36,6 @@ class AutomatedEmailFixture:
             subqueryload(Attendee.dept_memberships),
             subqueryload(Attendee.dept_memberships_with_role),
             subqueryload(Attendee.depts_where_working),
-            subqueryload(Attendee.hotel_requests),
             subqueryload(Attendee.promo_code_groups),
             subqueryload(Attendee.promo_code),
             subqueryload(Attendee.assigned_panelists)],
@@ -46,7 +46,6 @@ class AutomatedEmailFixture:
         Group: [subqueryload(Group.attendees)],
         LotteryApplication: [subqueryload(LotteryApplication.attendee)],
         PromoCodeGroup: [subqueryload(PromoCodeGroup.buyer)],
-        Room: [subqueryload(Room.assignments).subqueryload(RoomAssignment.attendee)],
         IndieStudio: [subqueryload(IndieStudio.developers), subqueryload(IndieStudio.games)],
         IndieGame: [joinedload(IndieGame.studio).subqueryload(IndieStudio.developers)],
         IndieJudge: [joinedload(IndieJudge.admin_account).joinedload(AdminAccount.attendee)],
@@ -225,7 +224,7 @@ if c.ATTENDEE_ACCOUNTS_ENABLED:
     if c.OIDC_ENABLED:
         AutomatedEmailFixture(
             AttendeeAccount,
-            f'{c.EVENT_NAME_AND_YEAR} Account Setup',
+            f'Claim Your Badge for {c.EVENT_NAME_AND_YEAR}',
             'accounts/new_sso_account.html', None,
             'sso_account_setup',
             sender=c.ADMIN_EMAIL,
@@ -280,7 +279,7 @@ if c.TRANSFERABLE_BADGE_TYPES:
         f'{c.EVENT_NAME} Pending Badge Code',
         'reg_workflow/pending_code.txt', None,
         'badge_transfer_code',
-        sender=c.REGDESK_EMAIL,
+        sender=c.BADGE_TRANSFERS_EMAIL,
         send_filter='lambda a: a.badge_status == c.PENDING_STATUS and a.paid == c.PENDING'
     )
 
@@ -288,21 +287,21 @@ if c.TRANSFERABLE_BADGE_TYPES:
         None, f'{c.EVENT_NAME} Registration Transferred',
         'reg_workflow/badge_transferee.txt', None,
         'code_badge_transfer_new_badge',
-        sender=c.REGDESK_EMAIL
+        sender=c.BADGE_TRANSFERS_EMAIL
     )
 
     AutomatedEmailFixture(
         None, f'{c.EVENT_NAME} Registration Transferred',
         'reg_workflow/badge_transferer.txt', None,
         'code_badge_transfer_old_badge',
-        sender=c.REGDESK_EMAIL
+        sender=c.BADGE_TRANSFERS_EMAIL
     )
 
     AutomatedEmailFixture(
         None, f'{c.EVENT_NAME} Registration Transferred',
         'reg_workflow/badge_transfer.txt', None,
         'link_badge_transfer',
-        sender=c.REGDESK_EMAIL
+        sender=c.BADGE_TRANSFERS_EMAIL
     )
 
 
@@ -330,12 +329,11 @@ if c.GUIDEBOOK_UPDATES_EMAIL:
     )
 
 
-if c.ENABLE_PENDING_EMAILS_REPORT:
-    AdminReportEmailFixture(
-        f'{c.EVENT_NAME} Pending Emails Report',
-        'daily_checks/pending_emails.html',
-        'pending_emails_admin',
-    )
+AdminReportEmailFixture(
+    f'{c.EVENT_NAME} Pending Emails Report',
+    'daily_checks/pending_emails.html',
+    'pending_emails_admin',
+)
 
 
 AdminReportEmailFixture(
@@ -841,15 +839,11 @@ AutomatedEmailFixture(
 if not c.LOCAL_ACCOUNTS_DISABLED:
     earliest_opening_date = min(c.PREREG_OPEN, c.DEALER_REG_START) if c.DEALER_REG_START else c.PREREG_OPEN
 
-    def staff_import_placeholder(a): return a.placeholder and (a.registered_local <= c.PREREG_OPEN
-                                                               and (a.admin_account or
-                                                                    "staff import" in a.admin_notes.lower()))
-
     AutomatedEmailFixture(
         Attendee,
         f'Claim your badge for {c.EVENT_NAME_AND_YEAR}!',
         'placeholders/regular.txt',
-        f"lambda a: a.placeholder and a.registered_local > '{earliest_opening_date}' and a.paid == c.NEED_NOT_PAY",
+        "lambda a: a.placeholder and a.registered_local > earliest_opening_date and a.paid == c.NEED_NOT_PAY",
         'generic_badge_confirmation_comped',
         sender=c.CONTACT_EMAIL,
         allow_at_the_con=True)
@@ -858,7 +852,7 @@ if not c.LOCAL_ACCOUNTS_DISABLED:
         Attendee,
         f'Please complete your {c.EVENT_NAME_AND_YEAR} registration',
         'placeholders/regular.txt',
-        f"lambda a: a.placeholder and a.registered_local > '{earliest_opening_date}' and \
+        "lambda a: a.placeholder and a.registered_local > earliest_opening_date and \
             a.paid != c.NEED_NOT_PAY and 'converted badge' not in a.admin_notes.lower()",
         'generic_badge_confirmation',
         sender=c.CONTACT_EMAIL,
@@ -867,7 +861,7 @@ if not c.LOCAL_ACCOUNTS_DISABLED:
     StopsEmailFixture(
         f'Claim your Staff badge for {c.EVENT_NAME} {c.EVENT_YEAR}!',
         'placeholders/imported_volunteer.txt',
-        staff_import_placeholder,
+        "lambda a: a.placeholder and a.imported_staff",
         'volunteer_again_inquiry')
 
     AutomatedEmailFixture(
@@ -897,7 +891,7 @@ if c.VOLUNTEER_CHECKLIST_OPEN:
     StopsEmailFixture(
         f'Still want to volunteer at {c.EVENT_NAME} ({c.EVENT_DATE})?',
         'shifts/volunteer_check.txt',
-        "lambda a: c.VOLUNTEER_SIGNUPS_AVAILABLE and a.badge_type != c.CONTRACTOR_BADGE and c.VOLUNTEER_RIBBON in a.ribbon_ints \
+        "lambda a: c.CHECKLIST_OR_SIGNUPS_OPEN and a.badge_type != c.CONTRACTOR_BADGE and c.VOLUNTEER_RIBBON in a.ribbon_ints \
             and a.takes_shifts and a.weighted_hours == 0",
         'volunteer_still_interested_inquiry',
         when=[days_before(28, c.FINAL_EMAIL_DEADLINE)])
@@ -914,22 +908,23 @@ if c.SHIFTS_CREATED:
     StopsEmailFixture(
         f'{c.EVENT_NAME} ({c.EVENT_DATE}) shifts are live!',
         'shifts/shifts_created.txt',
-        "lambda a: c.AFTER_SHIFTS_CREATED and a.badge_type != c.CONTRACTOR_BADGE and a.takes_shifts and a.registered_local <= c.SHIFTS_CREATED",
+        "lambda a: a.shift_signups_available and a.badge_type != c.CONTRACTOR_BADGE and \
+            a.takes_shifts and a.registered_local <= a.shift_signups_start",
         'volunteer_shift_signup_notification',
         when=[before(c.PREREG_TAKEDOWN)])
 
     StopsEmailFixture(
         f'Reminder to sign up for {c.EVENT_NAME} ({c.EVENT_DATE}) shifts',
         'shifts/reminder.txt',
-        "lambda a: c.AFTER_SHIFTS_CREATED and a.badge_type != c.CONTRACTOR_BADGE and \
-            days_after(14, max(a.registered_local, c.SHIFTS_CREATED))() and a.takes_shifts and not a.shift_minutes",
+        "lambda a: a.shift_signups_available and a.badge_type != c.CONTRACTOR_BADGE and \
+            days_after(14, max(a.registered_local, a.shift_signups_start))() and a.takes_shifts and not a.shift_minutes",
         'volunteer_shift_signup_reminder',
         when=[before(c.PREREG_TAKEDOWN)])
 
     StopsEmailFixture(
         f'Last chance to sign up for {c.EVENT_NAME} ({c.EVENT_DATE}) shifts',
         'shifts/reminder.txt',
-        "lambda a: c.AFTER_SHIFTS_CREATED and a.badge_type != c.CONTRACTOR_BADGE and \
+        "lambda a: a.shift_signups_available and a.badge_type != c.CONTRACTOR_BADGE and \
             (not c.PREREG_TAKEDOWN or c.BEFORE_PREREG_TAKEDOWN) and a.takes_shifts and not a.shift_minutes",
         'volunteer_shift_signup_reminder_last_chance',
         when=[days_before(10, c.EPOCH)])
@@ -1060,13 +1055,14 @@ if c.HOTEL_LOTTERY_STAFF_START:
 
 
 if c.HOTEL_LOTTERY_FORM_START:
-    earliest_hotel_deadline = c.HOTEL_LOTTERY_FORM_WAITLIST if c.HOTEL_LOTTERY_FORM_WAITLIST else c.HOTEL_LOTTERY_FORM_DEADLINE
+    earliest_hotel_deadline = c.HOTEL_LOTTERY_FORM_DEADLINE
 
     AutomatedEmailFixture(
         Attendee,
         f'Did you want to enter the {c.EVENT_NAME} {c.EVENT_YEAR} hotel lottery?',
         'hotel/enter_lottery.html',
-        "lambda a: a.hotel_lottery_eligible and not a.lottery_application and days_after(1, a.registered)()",
+        "lambda a: a.hotel_lottery_eligible and not a.lottery_application "
+        "and not a.active_room_assignments and days_after(1, a.registered)()",
         'enter_hotel_lottery',
         when=[days_before(7, earliest_hotel_deadline)],
         sender=c.HOTEL_LOTTERY_EMAIL,)
@@ -1081,155 +1077,137 @@ if c.HOTEL_LOTTERY_FORM_START:
 
 
 if c.HOTEL_LOTTERY_STAFF_START or c.HOTEL_LOTTERY_FORM_START:
-    if c.HOTEL_LOTTERY_ROOM_INVENTORY:
-        HotelLotteryEmailFixture(
-            f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Notification',
-            'hotel/award_notification.html',
-            "lambda a: a.status == c.AWARDED and not a.final_status_hidden and a.booking_url_ready",
-            'hotel_lottery_awarded'
-        )
-
-        HotelLotteryEmailFixture(
-            f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Notification',
-            'hotel/reject_notification.html',
-            "lambda a: a.status == c.REJECTED and not a.final_status_hidden",
-            'hotel_lottery_rejected'
-        )
-
-        if c.HOTEL_LOTTERY_FORM_WAITLIST:
-            HotelLotteryEmailFixture(
-                f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Notification',
-                'hotel/reject_notification.html',
-                "lambda a: a.status == c.COMPLETE and a.qualifies_for_first_round",
-                'hotel_lottery_first_round_rejected',
-                when=[after(c.HOTEL_LOTTERY_FORM_WAITLIST)],
-            )
-
-        HotelLotteryEmailFixture(
-            f'Reminder to confirm your {c.EVENT_NAME_AND_YEAR} hotel reservation',
-            'hotel/guarantee_reminder.html',
-            "lambda a: a.status == c.AWARDED and a.booking_url_ready and \
-                days_before(7, a.guarantee_deadline)() and not a.parent_application",
-            'hotel_lottery_guarantee_reminder'
-        )
-        
-        HotelLotteryEmailFixture(
-            f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Award Cancelled',
-            'hotel/cancel_notification.html',
-            "lambda a: a.status == c.CANCELLED",
-            'hotel_lottery_award_cancelled'
-        )
-
-        HotelLotteryEmailFixture(
-            f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Award Confirmed!',
-            'hotel/secure_notification.html',
-            "lambda a: a.status == c.SECURED",
-            'hotel_lottery_secured'
-        )
-
     HotelLotteryEmailFixture(
-        f'{c.EVENT_NAME} Lottery {c.HOTEL_LOTTERY_GROUP_TERM} Disbanded',
-        'hotel/removed_from_group.html', None,
-        'hotel_lottery_group_removed'
+        f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Notification',
+        'hotel/award_notification.html',
+        "lambda a: a.status == c.AWARDED and a.booking_url_ready",
+        'hotel_lottery_awarded'
     )
 
     HotelLotteryEmailFixture(
-        f'{c.EVENT_NAME_AND_YEAR} ' + '{app.entry_type_label} Lottery Confirmation',
-        'hotel/hotel_lottery_entry.html', None,
-        'hotel_lottery_confirmation'
+        f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Notification',
+        'hotel/reject_notification.html',
+        "lambda a: a.status == c.REJECTED",
+        'hotel_lottery_rejected'
     )
 
     HotelLotteryEmailFixture(
-        f'{c.EVENT_NAME_AND_YEAR} ' + '{app.entry_type_label} Lottery Updated',
-        'hotel/hotel_lottery_entry.html', None,
-        'hotel_lottery_updated'
+        f'Reminder to confirm your {c.EVENT_NAME_AND_YEAR} hotel reservation',
+        'hotel/guarantee_reminder.html',
+        "lambda a: a.status == c.AWARDED and a.booking_url_ready and \
+            days_before(7, a.guarantee_deadline)() and not a.parent_application",
+        'hotel_lottery_guarantee_reminder'
     )
-
+    
     HotelLotteryEmailFixture(
-        f'{c.EVENT_NAME_AND_YEAR} Room Lottery Updated',
-        'hotel/group_entry_updated.html', None,
-        'group_lottery_updated'
+        f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Award Cancelled',
+        'hotel/cancel_notification.html',
+        "lambda a: a.status == c.CANCELLED",
+        'hotel_lottery_award_cancelled'
     )
 
-    HotelLotteryEmailFixture(
-        '{app.attendee.first_name} ' + f'has left your {c.EVENT_NAME} Lottery {c.HOTEL_LOTTERY_GROUP_TERM}',
-        'hotel/group_member_left.html', None,
-        'hotel_lottery_group_member_left'
-    )
+# Transactional lottery/room emails
+HotelLotteryEmailFixture(
+    f'{c.EVENT_NAME} Lottery {c.HOTEL_LOTTERY_GROUP_TERM} Disbanded',
+    'hotel/removed_from_group.html', None,
+    'hotel_lottery_group_removed'
+)
 
-    HotelLotteryEmailFixture(
-        f'{c.EVENT_NAME_AND_YEAR} Lottery Entry Cancelled',
-        'hotel/lottery_entry_cancelled.html', None,
-        'hotel_lottery_cancelled'
-    )
+AutomatedEmailFixture(
+    RoomAssignment,
+    f'{c.EVENT_NAME_AND_YEAR} Hotel Lottery Award Confirmed!',
+    'hotel/secure_notification.html', None,
+    'hotel_lottery_secured',
+    sender=c.HOTEL_LOTTERY_EMAIL,
+)
 
-    HotelLotteryEmailFixture(
-        f'{c.EVENT_NAME} Lottery {c.HOTEL_LOTTERY_GROUP_TERM} Leader Changed',
-        'hotel/group_new_leader.html', None,
-        'group_lottery_leader_changed'
-    )
+HotelLotteryEmailFixture(
+    f'{c.EVENT_NAME_AND_YEAR} ' + '{app.entry_type_label} Lottery Confirmation',
+    'hotel/hotel_lottery_entry.html', None,
+    'hotel_lottery_confirmation'
+)
 
-    HotelLotteryEmailFixture(
-        f'Someone has joined your {c.EVENT_NAME} Lottery {c.HOTEL_LOTTERY_GROUP_TERM}',
-        'hotel/group_member_joined.html', None,
-        'group_lottery_member_joined'
-    )
+HotelLotteryEmailFixture(
+    f'{c.EVENT_NAME_AND_YEAR} ' + '{app.entry_type_label} Lottery Updated',
+    'hotel/hotel_lottery_entry.html', None,
+    'hotel_lottery_updated'
+)
 
+HotelLotteryEmailFixture(
+    f'{c.EVENT_NAME_AND_YEAR} Room Lottery Updated',
+    'hotel/group_entry_updated.html', None,
+    'group_lottery_updated'
+)
 
-if c.HOTELS_ENABLED and c.HOURS_FOR_HOTEL_SPACE:
-    AutomatedEmailFixture(
-        Attendee,
-        f'Want volunteer hotel room space at {c.EVENT_NAME}?',
-        'hotel/hotel_rooms.txt',
-        "lambda a: a.badge_type != c.CONTRACTOR_BADGE and a.hotel_eligible and not a.hotel_requests and a.takes_shifts",
-        'volunteer_hotel_room_inquiry',
-        sender=c.ROOM_EMAIL_SENDER,
-        when=[days_before(45, c.ROOM_DEADLINE, 14)])
+HotelLotteryEmailFixture(
+    '{app.attendee.first_name} ' + f'has left your {c.EVENT_NAME} Lottery {c.HOTEL_LOTTERY_GROUP_TERM}',
+    'hotel/group_member_left.html', None,
+    'hotel_lottery_group_member_left'
+)
 
-    AutomatedEmailFixture(
-        Attendee,
-        f'Reminder to sign up for {c.EVENT_NAME} hotel room space',
-        'hotel/hotel_reminder.txt',
-        "lambda a: a.badge_type != c.CONTRACTOR_BADGE and a.hotel_eligible and not a.hotel_requests and a.takes_shifts",
-        'hotel_sign_up_reminder',
-        sender=c.ROOM_EMAIL_SENDER,
-        when=[days_before(14, c.ROOM_DEADLINE, 2)])
+HotelLotteryEmailFixture(
+    f'{c.EVENT_NAME_AND_YEAR} Lottery Entry Cancelled',
+    'hotel/lottery_entry_cancelled.html', None,
+    'hotel_lottery_cancelled'
+)
 
-    AutomatedEmailFixture(
-        Attendee,
-        f'Last chance to sign up for {c.EVENT_NAME} hotel room space',
-        'hotel/hotel_reminder.txt',
-        "lambda a: a.badge_type != c.CONTRACTOR_BADGE and a.hotel_eligible and not a.hotel_requests and a.takes_shifts",
-        'hotel_sign_up_reminder_last_chance',
-        sender=c.ROOM_EMAIL_SENDER,
-        when=[days_before(2, c.ROOM_DEADLINE)])
+HotelLotteryEmailFixture(
+    f'{c.EVENT_NAME} Lottery {c.HOTEL_LOTTERY_GROUP_TERM} Leader Changed',
+    'hotel/group_new_leader.html', None,
+    'group_lottery_leader_changed'
+)
 
-    AutomatedEmailFixture(
-        Attendee,
-        f'Reminder to meet your {c.EVENT_NAME} hotel room requirements',
-        'hotel/hotel_hours.txt',
-        "lambda a: a.badge_type != c.CONTRACTOR_BADGE and a.hotel_shifts_required and a.weighted_hours < c.HOURS_FOR_HOTEL_SPACE",
-        'hotel_requirements_reminder',
-        sender=c.ROOM_EMAIL_SENDER,
-        when=[days_before(14, c.FINAL_EMAIL_DEADLINE, 7)])
+HotelLotteryEmailFixture(
+    f'Someone has joined your {c.EVENT_NAME} Lottery {c.HOTEL_LOTTERY_GROUP_TERM}',
+    'hotel/group_member_joined.html', None,
+    'group_lottery_member_joined'
+)
 
-    AutomatedEmailFixture(
-        Attendee,
-        f'Final reminder to meet your {c.EVENT_NAME} hotel room requirements',
-        'hotel/hotel_hours.txt',
-        "lambda a: a.badge_type != c.CONTRACTOR_BADGE and a.hotel_shifts_required and a.weighted_hours < c.HOURS_FOR_HOTEL_SPACE",
-        'hotel_requirements_reminder_last_chance',
-        sender=c.ROOM_EMAIL_SENDER,
-        when=[days_before(7, c.FINAL_EMAIL_DEADLINE)])
-
-    if not c.HOTEL_REQUESTS_URL:
-        AutomatedEmailFixture(
-            Room,
-            f'{c.EVENT_NAME} Hotel Room Assignment',
-            'hotel/room_assignment.txt',
-            "lambda r: r.locked_in",
-            'hotel_room_assignment',
-            sender=c.ROOM_EMAIL_SENDER,)
+HotelLotteryEmailFixture(
+    f'You have a room at {c.EVENT_NAME}',
+    'hotel/room_occupant_invite.html', None,
+    'room_occupant_invite'
+)
+HotelLotteryEmailFixture(
+    f'Someone joined your {c.EVENT_NAME} room',
+    'hotel/room_occupant_joined.html', None,
+    'room_occupant_joined'
+)
+HotelLotteryEmailFixture(
+    f'You have been invited to a room at {c.EVENT_NAME}',
+    'hotel/room_guest_invite.html', None,
+    'room_guest_invite'
+)
+HotelLotteryEmailFixture(
+    f'Still interested in a {c.EVENT_NAME_AND_YEAR} hotel room?',
+    'hotel/confirm_interest_request.html', None,
+    'hotel_lottery_confirm_interest'
+)
+HotelLotteryEmailFixture(
+    f'{c.EVENT_NAME_AND_YEAR} Hotel Reservation Updated',
+    'hotel/confirmation_updated.html', None,
+    'hotel_lottery_confirmation_updated'
+)
+HotelLotteryEmailFixture(
+    f'{c.EVENT_NAME_AND_YEAR} hotel inventory changed',
+    'hotel/inventory_changed_owner.html', None,
+    'hotel_lottery_inventory_changed_owner'
+)
+HotelLotteryEmailFixture(
+    f'{c.EVENT_NAME} Hotel Lottery - Room Dates Updated',
+    'hotel/waitlist_fulfilled.html', None,
+    'hotel_lottery_waitlist_fulfilled'
+)
+HotelLotteryEmailFixture(
+    f'{c.EVENT_NAME_AND_YEAR} hotel waitlist',
+    'hotel/waitlist_reveal.html', None,
+    'hotel_lottery_waitlist_reveal'
+)
+HotelLotteryEmailFixture(
+    f'Your {c.EVENT_NAME_AND_YEAR} hotel room has been released',
+    'hotel/room_expired.html', None,
+    'hotel_lottery_room_expired'
+)
 
 
 # =============================
@@ -1400,7 +1378,7 @@ if c.INDIE_RETRO_START:
         f'{c.EVENT_NAME} Indie Retro Checklist',
         'indie_arcade/checklist_open.txt',
         "lambda mg: True",
-        'ia_checklist_open'
+        'retro_checklist_open'
     )
 
 

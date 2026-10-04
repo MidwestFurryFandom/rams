@@ -13,7 +13,6 @@ def get_common_required_fields(check_func):
     return {
         'earliest_checkin_date': ("Please enter your preferred check-in date.", 'earliest_checkin_date', check_func),
         'latest_checkout_date': ("Please enter your preferred check-out date.", 'latest_checkout_date', check_func),
-        'selection_priorities': ("Please rank your priorities for selecting a hotel room.", 'selection_priorities', check_func),
     }
 
 
@@ -30,8 +29,8 @@ def get_earliest_checkout_date(form):
 
 
 LotteryInfo.field_validation.required_fields = {
-    'legal_first_name': "Please enter your first name as it appears on your photo ID.",
-    'legal_last_name': "Please enter your last name as it appears on your photo ID.",
+    'hotel_first_name': "Please enter your first name as it appears on your photo ID.",
+    'hotel_last_name': "Please enter your last name as it appears on your photo ID.",
     'cellphone': "Please provide a phone number for the hotel to contact you.",
     'terms_accepted': "You must agree to the room lottery policies to continue.",
     'data_policy_accepted': "You must agree to the data policies to continue.",
@@ -57,11 +56,9 @@ def check_required_room_steps(form):
 
     room_step = int(form.model.current_step) if form.model.current_step else 0
 
-    if room_step < c.HOTEL_LOTTERY_FORM_STEPS.get('room_selection_pref', 9999):
-        optional_list.append('selection_priorities')
     if room_step < c.HOTEL_LOTTERY_FORM_STEPS.get('room_hotel_type', 9999):
         optional_list.extend(['room_type_preference', 'hotel_preference'])
-    elif not c.HOTEL_LOTTERY_HOTELS_OPTS:
+    elif hasattr(form, 'hotel_preference') and not form.hotel_preference.choices:
         optional_list.append('hotel_preference')
     if room_step < c.HOTEL_LOTTERY_FORM_STEPS.get('room_dates', 9999):
         optional_list.extend(['earliest_checkin_date', 'latest_checkout_date'])
@@ -153,19 +150,11 @@ def before_preferred_checkout(form, field):
                                 is earlier than your preferred check-out date.")
 
 
-@RoomLottery.field_validation('selection_priorities')
-def all_options_ranked(form, field):
-    if field.data and len(field.data) < len(c.HOTEL_LOTTERY_PRIORITIES_OPTS):
-        raise ValidationError("Please rank all priorities for selecting a hotel room.")
-
-
 def check_required_suite_steps(form):
     optional_list = []
 
     suite_step = int(form.model.current_step) if form.model.current_step else 0
 
-    if suite_step < c.HOTEL_LOTTERY_FORM_STEPS.get('suite_selection_pref', 9999):
-        optional_list.append('selection_priorities')
     if suite_step < c.HOTEL_LOTTERY_FORM_STEPS.get('suite_hotel_type', 9999) or form.room_opt_out.data:
         optional_list.extend(['room_type_preference', 'hotel_preference'])
     if suite_step < c.HOTEL_LOTTERY_FORM_STEPS.get('suite_type', 9999):
@@ -198,8 +187,82 @@ SuiteLottery.field_validation.validations['earliest_checkin_date']['optional'] =
 SuiteLottery.field_validation.validations['latest_checkout_date']['optional'] = validators.Optional()
 
 
+def _unavailable_type_names(session, hotel_ids, type_ids, is_suite):
+    """Of the ranked types, those no selected hotel offers, by name."""
+    from uber.hotel.queries import active_inventory_type_map
+    from uber.models.hotel import LotteryRoomType
+
+    avail_map = active_inventory_type_map(session, is_suite=is_suite)
+    available = set()
+    for hotel_id in hotel_ids:
+        available.update(avail_map.get(str(hotel_id), []))
+    missing = [str(t) for t in type_ids if str(t) not in available]
+    if not missing:
+        return []
+    names = {str(rt.id): rt.name for rt in session.query(LotteryRoomType).filter(
+        LotteryRoomType.id.in_(missing)).all()}
+    return [names.get(t, 'a room type') for t in missing]
+
+
+def _check_types_available(form, field, is_suite, step_label):
+    """Block only when EVERY ranked type is unavailable, which is an entry
+    that cannot win anything. A partial overlap is merely worth warning
+    about, and that warning is client-side.
+    """
+    if not field.data or not form.hotel_preference.data:
+        return
+
+    hotel_ids = [h for h in form.hotel_preference.data if h]
+    type_ids = [t for t in field.data if t]
+    if not hotel_ids or not type_ids:
+        return
+
+    # The model's own session, so this sees the same transaction the rest of
+    # validation does rather than opening a second connection.
+    from sqlalchemy.orm import object_session
+    session = object_session(form.model)
+    if session is None:
+        return
+
+    unavailable = _unavailable_type_names(session, hotel_ids, type_ids, is_suite)
+    if len(unavailable) < len(type_ids):
+        return
+
+    raise ValidationError(
+        "None of the {} you ranked are available at the hotels you selected ({}). "
+        "Go back to {} and rank one that is, or choose a different hotel.".format(
+            'suite types' if is_suite else 'room types',
+            ', '.join(unavailable), step_label))
+
+
+@RoomLottery.field_validation('room_type_preference')
+def room_types_exist_at_selected_hotels(form, field):
+    if not room_steps_check(field):
+        return
+    _check_types_available(form, field, is_suite=False,
+                           step_label='Hotel and Room Type Preference')
+
+
+@SuiteLottery.field_validation('suite_type_preference')
+def suite_types_exist_at_selected_hotels(form, field):
+    if not suite_steps_check(field):
+        return
+    _check_types_available(form, field, is_suite=True, step_label='Suite Type Preference')
+
+
+# SuiteLottery gets its own CustomValidation instance, so RoomLottery's
+# registration above does not reach it. A suite entry that has not opted out
+# also competes for standard rooms, so its room ranking needs the same check.
+@SuiteLottery.field_validation('room_type_preference')
+def suite_room_types_exist_at_selected_hotels(form, field):
+    if not suite_steps_check(field) or form.room_opt_out.data:
+        return
+    _check_types_available(form, field, is_suite=False,
+                           step_label='Hotel and Room Type Preference')
+
+
 lottery_form_fields = ['earliest_checkin_date', 'latest_checkin_date', 'earliest_checkout_date', 'latest_checkout_date',
-                      'room_type_preference', 'hotel_preference', 'selection_priorities', 'suite_terms_accepted',
+                      'room_type_preference', 'hotel_preference', 'suite_terms_accepted',
                       'suite_type_preference']
 
 
@@ -230,8 +293,6 @@ LotteryAdminInfo.field_validation.required_fields.update({
 })
 
 
-LotteryAdminInfo.field_validation.validations['assigned_check_in_date']['optional'] = validators.Optional()
-LotteryAdminInfo.field_validation.validations['assigned_check_out_date']['optional'] = validators.Optional()
 LotteryAdminInfo.field_validation.validations['current_step']['optional'] = validators.Optional()
 LotteryAdminInfo.field_validation.validations['current_step']['minimum'] = validators.NumberRange(
     min=0, message="A lottery entry cannot be on a step below 0.")

@@ -1,5 +1,5 @@
 {% macro label(field, label_text='', required_if="false") %}
-  <label for="{{ field.label.field_id }}"
+  <label for="{{ kwargs.get('field_id', field.label.field_id) }}"
 {% for key in kwargs %} {{ key }}="{{ kwargs[key] }}"{% endfor %}>{{ label_text }}
   <span class="required-indicator text-danger" x-show="{{ required_if }}"> *</span></label>
 {% endmacro %}
@@ -77,6 +77,9 @@
   {% set _ = custom_kwargs.update({'x-' ~ key[7:]: val}) %}
   {% elif val or key != 'readonly' %}
   {% set _ = custom_kwargs.update({key: val}) %}
+  {% endif %}
+  {% if key == 'id' %}
+  {% set _ = label_kwargs.update({'field_id': val}) %}
   {% endif %}
 {% endfor %}
 
@@ -177,7 +180,7 @@
 <div class="card-group mt-0">
 {% for opt in opts %}
 {% set disabled_card = opt.value in disabled_opts %}
-  <div class="card {{ target_field.name }}_card {{ text_class }}{% if disabled_card %} disabled-card bg-secondary text-white{% endif %}" style="max-width: 18rem;">
+  <div class="card {{ target_field.name }}_card {{ text_class }}{% if disabled_card %} disabled-card bg-secondary text-white{% endif %}" style="max-width: {% if opt.price %}1{% endif %}8rem;">
       <div class="card-header" style="transform: rotate(0);">
           <label for="{{ field_id }}-{{ opt.value }}" class="h5 card-title mb-0 text-nowrap">
             {% if disabled_card or is_preview or read_only %}
