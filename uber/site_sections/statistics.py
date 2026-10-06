@@ -168,7 +168,7 @@ class Root:
         badge_stocks = c.BADGE_PRICES['stocks']
         for var in c.BADGE_VARS:
             badge_type = getattr(c, var)
-            counts['badge_stocks'][c.BADGES[badge_type]] = badge_stocks.get(var.lower(), 'no limit set')
+            counts['badge_stocks'][c.BADGES[badge_type]] = badge_stocks.get(var.lower(), None)
             counts['badge_counts'][c.BADGES[badge_type]] = c.get_badge_count_by_type(badge_type)
             if badge_type == c.ATTENDEE_BADGE:
                 counts['reserved_badges'][c.BADGES[badge_type]] = c.get_badge_promo_codes()
@@ -177,7 +177,7 @@ class Root:
 
         shirt_stocks = c.SHIRT_SIZE_STOCKS
         for shirt_enum_key in c.PREREG_SHIRTS.keys():
-            counts['shirt_stocks'][c.PREREG_SHIRTS[shirt_enum_key]] = shirt_stocks.get(shirt_enum_key, 'no limit set')
+            counts['shirt_stocks'][c.PREREG_SHIRTS[shirt_enum_key]] = shirt_stocks.get(shirt_enum_key, None)
             counts['shirt_counts'][c.PREREG_SHIRTS[shirt_enum_key]] = \
                 c.REDIS_STORE.hget(c.REDIS_PREFIX + 'shirt_counts', shirt_enum_key)
 
