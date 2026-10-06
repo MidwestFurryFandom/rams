@@ -770,7 +770,7 @@ if c.DEALER_REG_START:
         MarketplaceEmailFixture(
             f'Please complete your {c.EVENT_NAME} {c.DEALER_APP_TERM.capitalize()}!',
             'dealers/signnow_request.html',
-            "lambda g: g.status in [c.APPROVED, c.SHARED] and c.SIGNNOW_DEALER_TEMPLATE_ID and not g.signnow_document_signed",
+            "lambda g: g.status in c.DEALER_ACCEPTED_STATUSES and c.SIGNNOW_DEALER_TEMPLATE_ID and not g.signnow_document_signed",
             'dealer_signnow_email')
 
     if c.DEALER_PAYMENT_DUE:
