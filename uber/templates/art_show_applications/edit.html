@@ -111,8 +111,17 @@
           {% endfor %}
         {% endif %}
         {% endif %}
+
+        {% if c.INDEPENDENT_ART_SHOW %}
+        {% set validation_form_list = ['ArtShowInfo', 'ArtistAttendeeInfo', 'ArtistMailingInfo'] %}
+        {% elif app.delivery_method == c.BY_MAIL %}
+        {% set validation_form_list = ['ArtShowInfo', 'ArtistMailingInfo'] %}
+        {% else %}
+        {% set validation_form_list = ['ArtShowInfo'] %}
+        {% endif %}
+
         
-        {{ form_macros.form_validation('edit-app-form', 'validate_app') }}
+        {{ form_macros.form_validation('edit-app-form', 'validate_app', form_list=validation_form_list) }}
         <form novalidate method="post" action="edit" id="edit-app-form" role="form">
           {{ csrf_token() }}
           <input type="hidden" name="id" value="{{ app.id }}">
