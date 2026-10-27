@@ -3,7 +3,7 @@
 <body>
 <p>
   Welcome to the Artist's Marketplace for {{ c.EVENT_NAME_AND_YEAR }}! We had a huge turnout this year with almost 200 artists applying for our wonderful little space,
-  so it's going to be an incredible year ahead! We'll be back in Hall B on the first floor of the DESCC, and with the Dealer's Den right next door in Hall F - it'll be a ton of traffic all in one place!
+  so it's going to be an incredible year ahead! We'll be back in Hall B on the first floor of the DESCC, and with the Dealer's Den right next door in Hall A - it'll be a ton of traffic all in one place!
 </p>
 
 <p>
@@ -43,8 +43,13 @@
 {% if app.amount_unpaid %}
   In order to complete your application, you must pay the {{ app.amount_unpaid|format_currency }} marketplace fee 
   <a href="{{ c.URL_BASE }}/marketplace/edit?id={{ app.id }}" target="_blank">here</a>.
-Payment is expected by {{ c.MARKETPLACE_PAYMENT_DUE|datetime_local }} or your application may be removed and your space
-filled by another applicant.{% endif %}
+  Payment is expected by {{ c.MARKETPLACE_PAYMENT_DUE|datetime_local }} or your application may be removed and your space
+  filled by another applicant.
+{% elif c.SIGNNOW_MARKETPLACE_FOLDER_ID %}
+  Please look out for an email to sign our terms and conditions for vending at {{ c.EVENT_NAME }} in the near future.
+  After signing them, you will be able to pay the {{ group.cost|format_currency }} you owe using the credit card button
+  <a href="{{ c.URL_BASE }}/marketplace/edit?id={{ group.id }}">on this page</a>.
+{% endif %}
 </p>
 
 <p>
