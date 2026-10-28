@@ -57,7 +57,9 @@ Use these to add or rearrange fields. Remember to use {{ super() }} to print the
 
 <div class="row g-3 mb-3">
 {% block weight_visibility %}
+{% if c.SHIFT_WEIGHTING_ENABLED %}
 <div class="col-sm">{{ form_macros.input(job_or_template_info.weight, alpine_model="weight") }}</div>
+{% endif %}
 {% if job or job_or_template.is_new %}
 <div class="col-sm">{{ form_macros.input(job_or_template_info.visibility, **{'x-model.number':'visibility',':disabled':'no_slots'}) }}</div>
 {% else %}

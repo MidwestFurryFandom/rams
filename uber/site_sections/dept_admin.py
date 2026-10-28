@@ -229,7 +229,8 @@ class Root:
     def dept_members_export(self, out, session, department_id, message='', **params):
         department = session.get(Department, department_id)
         headers = ['Name', 'Legal Name', 'Email', 'Phone Number', 'Emergency Contact',
-                   'Weighted Hours', 'Badge Status', 'Placeholder', 'Has Shifts', 'Roles']
+                   'Weighted Hours' if c.SHIFT_WEIGHTING_ENABLED else 'Hours', 'Badge Status',
+                   'Placeholder', 'Has Shifts', 'Roles']
 
         out.writerow(headers)
         for attendee in department.members:

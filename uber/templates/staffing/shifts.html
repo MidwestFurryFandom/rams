@@ -50,7 +50,7 @@
     <ul class="mb-0">
       {% for req in _violations %}
         {% if req.kind == c.CORE %}
-          <li>Need {{ req.required_weighted_hours }} weighted hours by {{ req.night_date|date("%a %b %-d") }} (currently {{ c.CURRENT_VOLUNTEER.weighted_hours }}).</li>
+          <li>Need {{ req.required_weighted_hours }}{% if c.SHIFT_WEIGHTING_ENABLED %} weighted{% endif %} hours by {{ req.night_date|date("%a %b %-d") }} (currently {{ c.CURRENT_VOLUNTEER.weighted_hours }}).</li>
         {% else %}
           <li>Need a shift overlapping {{ req.shift_window_start|datetime_local("%a %b %-d %-I:%M%p") }}&nbsp;-&nbsp;{{ req.shift_window_end|datetime_local("%-I:%M%p") }} ({{ req.kind_label }}).</li>
         {% endif %}
@@ -211,7 +211,7 @@
   </div>
   <div class="toast-body">
     <div class="d-flex fst-italic mb-1 slots-weighting">
-      <div><span id="shift-slots"></span> slots filled</div><div class="ms-auto">x<span id="shift-weight"></span> weighting</div>
+      <div><span id="shift-slots"></span> slots filled</div>{% if c.SHIFT_WEIGHTING_ENABLED %}<div class="ms-auto">x<span id="shift-weight"></span> weighting</div>{% endif %}
     </div>
     <div id="shift-desc"></div>
     <div id="shift-time"></div>
@@ -492,7 +492,7 @@
     $('#shift-dept').text(eventInfo.extendedProps.department_name);
     if (eventInfo.extendedProps.slots != "") {
       $('#shift-slots').text(eventInfo.extendedProps.slots);
-      $('#shift-weight').text(eventInfo.extendedProps.weight);
+      {% if c.SHIFT_WEIGHTING_ENABLED %}$('#shift-weight').text(eventInfo.extendedProps.weight);{% endif %}
       $(".slots-weighting").removeClass('d-none');
     } else {
       $(".slots-weighting").addClass('d-none');
@@ -509,7 +509,7 @@
     if (eventInfo.extendedProps.assigned == false) {
       button = `<button type="button" class="btn btn-sm btn-success"
                 onClick="signUp('${eventInfo.id}', \`${eventInfo.title}\`, \`${eventInfo.extendedProps.department_name}\`,
-                '${moment(eventInfo.start).format("h:mma [on] dddd, MMM Do")})')">Sign Up</button>`
+                '${moment(eventInfo.start).format("h:mma [on] dddd, MMM Do")}')">Sign Up</button>`
     } else if (eventInfo.extendedProps.can_drop) {
       button = `<button type="button" class="btn btn-sm btn-warning" 
                 onClick="dropShift('${eventInfo.id}', \`${eventInfo.title}\`, \`${eventInfo.extendedProps.department_name}\`,
@@ -575,14 +575,14 @@
       p-1"><h2 class="${extraClasses['titleSize']} mb-0 text-truncate">${eventInfo.title}`;
     if (info.view.type == 'listWeek') {
       if (eventInfo.extendedProps.slots != "") {
-        html = html + `</h2><p class="mt-1 mb-1 fs-6"><em>${eventInfo.extendedProps.slots}</em> &nbsp;|&nbsp; 
-          <em>x${eventInfo.extendedProps.weight} weighting</em></p>`;
+        html = html + `</h2><p class="mt-1 mb-1 fs-6"><em>${eventInfo.extendedProps.slots}</em>
+          {% if c.SHIFT_WEIGHTING_ENABLED %} &nbsp;|&nbsp; <em>x${eventInfo.extendedProps.weight} weighting</em>{% endif %}</p>`;
       }
       html = html + `<p class="fs-5 pt-1 mb-1">${eventInfo.extendedProps.desc}</p>
         <p class="mb-0 mt-2">${button}</p>`;
     } else {
       if (eventInfo.extendedProps.slots != "") {
-        html = html + ` (${eventInfo.extendedProps.slots}) x${eventInfo.extendedProps.weight}`;
+        html = html + ` (${eventInfo.extendedProps.slots}){% if c.SHIFT_WEIGHTING_ENABLED %} x${eventInfo.extendedProps.weight}{% endif %}`;
       }
       html = html + `</h2>
         <p class="flex-grow-1 mt-1 text-truncate mb-0">${eventInfo.extendedProps.desc_text}</p>

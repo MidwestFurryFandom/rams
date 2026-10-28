@@ -590,14 +590,23 @@ class Root:
         
         jobs = session.query(Job).filter(*filters).order_by(Job.start_time).order_by(Job.name)
 
-        out.writerow(["Name", "Description", "Start Time", "Duration", "Extra 15?", "Slots", "Weight", "Roles"])
+        header_row = ["Name", "Description", "Start Time", "Duration", "Extra 15?", "Slots"]
+        if c.SHIFT_WEIGHTING_ENABLED:
+            header_row.append("Weight")
+        header_row.extend(["Roles", "All or Any Roles"])
+
+        out.writerow(header_row)
         
         for job in jobs:
             duration_str = f"{job.duration // 60} hours"
             if job.duration % 60:
                 duration_str += f" {job.duration % 60} minutes"
-            out.writerow([job.name, job.description, job.start_time_local.strftime('%Y-%m-%d %-I:%M %p'),
-                          duration_str, job.extra15, job.slots, job.weight, job.required_roles_labels])
+            row = [job.name, job.description, job.start_time_local.strftime('%Y-%m-%d %-I:%M %p'),
+                   duration_str, job.extra15, job.slots]
+            if c.SHIFT_WEIGHTING_ENABLED:
+                row.append(job.weight)
+            row.extend([job.required_roles_labels, "All" if job.all_roles_required else "Any"])
+            out.writerow()
 
     @site_mappable
     @csv_file

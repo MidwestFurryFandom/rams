@@ -477,6 +477,11 @@ class Job(MagModel, table=True):
         if not self.slots and not self.slots == 0:
             self.slots = 0
 
+    @presave_adjustment
+    def remove_weighting_if_disabled(self):
+        if not c.SHIFT_WEIGHTING_ENABLED and self.weight != 1:
+            self.weight = 1
+
     def fill_gaps(self, session):
         old_start_time = self.orig_value_of('start_time')
         old_duration = self.orig_value_of('duration')
@@ -762,6 +767,11 @@ class JobTemplate(MagModel, table=True):
     def zero_slots(self):
         if not self.min_slots and not self.min_slots == 0:
             self.min_slots = 0
+
+    @presave_adjustment
+    def remove_weighting_if_disabled(self):
+        if not c.SHIFT_WEIGHTING_ENABLED and self.weight != 1:
+            self.weight = 1
 
     @property
     def needs_refresh(self):

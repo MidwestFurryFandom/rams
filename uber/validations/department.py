@@ -32,6 +32,10 @@ BaseJobInfo.field_validation.required_fields = {
 }
 
 
+if not c.SHIFT_WEIGHTING_ENABLED:
+    BaseJobInfo.field_validation.validations['weight']['optional'] = validators.Optional()
+
+
 JobInfo.field_validation.required_fields = {
     'start_time': "Please select a start time.",
     'duration': "Please enter a duration.",

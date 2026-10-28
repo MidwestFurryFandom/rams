@@ -244,7 +244,7 @@ $(document).ready(function() {
     {% for job in jobs %}
         eventList.push({
             id: "{{ job.id }}",
-            title: "{{ job.name }} ({{ job.shifts | length }}/{{ job.slots }}) x{{ job.weight }}{{ " +15" if job.extra15 else "" }}",
+            title: "{{ job.name }} ({{ job.shifts | length }}/{{ job.slots }}){% if c.SHIFT_WEIGHTING_ENABLED %} x{{ job.weight }}{% endif %}{{ " +15" if job.extra15 else "" }}",
             start: "{{ job.start_time_local|datetime("%Y-%m-%dT%H:%M:%S") }}",
             end: "{{ job.end_time_local|datetime("%Y-%m-%dT%H:%M:%S") }}",
             {% if job.shifts|length == job.slots %}

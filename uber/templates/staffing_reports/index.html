@@ -15,8 +15,8 @@
     <thead>
       <tr>
         <th>Department</th>
-        <th>Total Weighted Hours</th>
-        <th>Weighted Hours Signed Up For</th>
+        <th>Total{% if c.SHIFT_WEIGHTING_ENABLED %} Weighted{% endif %} Hours</th>
+        <th>{% if c.SHIFT_WEIGHTING_ENABLED %}Weighted {% endif %}Hours Signed Up For</th>
         <th>Untaken Hours</th>
         <th>Volunteers</th>
       </tr>

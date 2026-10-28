@@ -1,5 +1,5 @@
 {% if attendee.takes_shifts %}
-    You are signed up for {{ attendee.weighted_hours }} hours (after weighting)
+    You are signed up for {{ attendee.weighted_hours }} hours{% if c.SHIFT_WEIGHTING_ENABLED %} (after weighting){% endif %}
 
     <br/> <br/>
     After working each shift, make sure you get a department chair to initial under the <b>Worked</b> column below.
@@ -25,7 +25,7 @@
         <td>Dept</td>
         <td>Start</td>
         <td>Hours</td>
-        <td>Weight</td>
+        {% if c.SHIFT_WEIGHTING_ENABLED %}<td>Weight</td>{% endif %}
         <td>Worked</td>
     </tr>
     {% for shift in attendee.shifts|sortBy('job.start_time') %}
@@ -34,7 +34,7 @@
             <td>{{ shift.job.department_name }}</td>
             <td>{{ shift.job.start_time|datetime_local("%A %-I:%M %p") }}</td>
             <td>{{ shift.job.duration / 60 }}</td>
-            <td>(x{{ shift.job.weight }})</td>
+            {% if c.SHIFT_WEIGHTING_ENABLED %}<td>(x{{ shift.job.weight }})</td>{% endif %}
             <td>__________</td>
         </tr>
         {% if shift.job.description %}
