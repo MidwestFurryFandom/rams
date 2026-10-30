@@ -130,7 +130,7 @@ class Root:
             selectinload(Attendee.dept_memberships_with_role), joinedload(Attendee.admin_account)
         ).all()
         for attendee in attendees:
-            attendee.trusted_here = attendee.trusted_in(department_id) if department_id else attendee.has_role_somewhere
+            attendee.trusted_here = attendee.has_role_in(department_id) if department_id else attendee.has_role_somewhere
             attendee.hours_here = attendee.weighted_hours_in(department_id)
 
         return {

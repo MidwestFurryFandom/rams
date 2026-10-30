@@ -19,7 +19,7 @@ import six
 import sqlalchemy
 from dateutil import parser as dateparser
 from pytz import UTC
-from sqlalchemy import and_, func, or_, create_engine
+from sqlalchemy import and_, case, func, or_, create_engine
 from sqlalchemy.dialects.postgresql.json import JSONB
 from sqlalchemy.event import listen
 from sqlalchemy.exc import IntegrityError, NoResultFound
@@ -1839,12 +1839,21 @@ class UberSession(sqlalchemy.orm.Session):
                     subqueryload(Job.shifts).subqueryload(Shift.attendee).subqueryload(Attendee.group)) \
                 .order_by(Job.start_time, Job.name)
 
-        def staffers_for_dropdown(self):
-            query = self.query(Attendee.id, Attendee.full_name).filter(Attendee.is_valid == True,
-                                                                       Attendee.staffing == True)
+        def staffers_for_dropdown(self, department_id=None):
+            query = self.query(Attendee.id, Attendee.full_name, BadgeInfo.ident).filter(
+                Attendee.is_valid == True, Attendee.staffing == True).outerjoin(Attendee.active_badge)
+            total_hours = self.query(Attendee.id, func.sum(Job.weight * (Job.duration + case((Job.extra15 == True, 15), else_=0))) / 60).filter(
+                Attendee.is_valid == True, Attendee.staffing == True).outerjoin(Attendee.shifts).outerjoin(Shift.job).group_by(Attendee.id)
+            
+            if department_id:
+                query = query.join(Attendee.assigned_depts).filter(Department.id == department_id)
+                total_hours = total_hours.join(Attendee.assigned_depts).filter(Department.id == department_id)
+
+            total_hours_dict = {id: hours for id, hours in total_hours}
+
             return [
-                {'id': id, 'full_name': full_name.title()}
-                for id, full_name in query.order_by(Attendee.full_name)]
+                {'id': id, 'full_name': full_name.title(), 'badge_num': badge_num,
+                 'total_hours': total_hours_dict[id]} for id, full_name, badge_num in query.order_by(Attendee.full_name)]
 
         def dept_heads(self, department_id=None):
             if department_id:

@@ -2225,9 +2225,6 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
             return False
         return any(m.department_id == department_id for m in self.dept_memberships)
 
-    def trusted_in(self, department_id):
-        return self.has_role_in(department_id)
-
     def can_admin_dept_for(self, department):
         return (self.admin_account and self.admin_account.full_dept_admin) \
             or self.has_inherent_role_in(department)
@@ -2293,6 +2290,15 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
         if not department_id:
             return False
         return any(m.department_id == department_id for m in self.dept_memberships_with_role)
+
+    def roles_in(self, department_id):
+        if not department_id:
+            return []
+
+        for membership in self.dept_memberships_with_role:
+            if membership.department_id == department_id:
+                return membership.dept_roles
+        return []
 
     def has_required_roles(self, job):
         if not job.required_roles:
