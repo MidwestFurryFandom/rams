@@ -487,7 +487,8 @@ class Job(MagModel, table=True):
         old_duration = self.orig_value_of('duration')
         if self.template and self.template.type == c.FILL_GAPS and (self.duration != old_duration or
                                                                     self.start_time != old_start_time):
-            self.template.fill_gap(session, self.start_time_local, self)
+            origin_day_int = self.template.get_origin_day_int(self)
+            self.template.fill_gap(session, origin_day_int, self)
             if old_start_time.date() != self.start_time.date():
                 self.template.fill_gap(session, old_start_time.astimezone(c.EVENT_TIMEZONE))
 
@@ -846,16 +847,12 @@ class JobTemplate(MagModel, table=True):
             5. Add shifts for any added days from step 1 -- we save this till the end to avoid extra processing.
         """
 
-        from uber.utils import date_trunc_day
-        from collections import defaultdict
-
         update_attrs = ['name', 'description', 'duration', 'weight', 'extra15',
                         'min_slots', 'visibility', 'all_roles_required']
 
         changes = {}
         add_days = None
         deleted_jobs = []
-        jobs_by_day = defaultdict(list)
 
         if self.type != c.CUSTOM:
             # Storing these now prevents extra hits to the DB
@@ -865,19 +862,17 @@ class JobTemplate(MagModel, table=True):
             old_days_ints = set([int(i) for i in str(self.orig_value_of('days')).split(',') if i])
             new_days_ints = set(self.days_ints)
 
+            old_jobs_by_day = self.jobs_by_day(old_days_ints, old_open_time, old_close_time)
+
             if old_days_ints != new_days_ints:
                 delete_days = old_days_ints - new_days_ints
                 add_days = new_days_ints - old_days_ints
 
-                if delete_days:
-                    jobs_by_date = session.query(
-                        date_trunc_day(Job.start_time), Job
-                        ).join(Job.template).filter(Job.job_template_id == self.id)
-                    for dt, job_to_delete in jobs_by_date:
-                        if int(dt.strftime('%Y%m%d')) in delete_days:
-                            deleted_jobs.append(job_to_delete)
-                            session.delete(job_to_delete)
-        
+                for day_int in delete_days:
+                    for job_to_delete in old_jobs_by_day[day_int]:
+                        deleted_jobs.append(job_to_delete)
+                        session.delete(job_to_delete)
+
         jobs_to_process = [j for j in self.jobs if j.id not in deleted_jobs]
 
         for attr in update_attrs:
@@ -907,28 +902,31 @@ class JobTemplate(MagModel, table=True):
             start_time_delta = timedelta(minutes=abs(new_open_minutes - old_open_minutes))
 
             for job in jobs_to_process:
-                jobs_by_day[job.start_time_local.strftime('%Y%m%d')].append(job)
                 if self.open_time > old_open_time:
                     job.start_time += start_time_delta
                 elif self.open_time < old_open_time:
                     job.start_time -= start_time_delta
 
-            for day, jobs in jobs_by_day.items():
-                self.update_last_jobs(session, day, jobs)
+            for day_int in old_days_ints:
+                self.update_last_jobs(session, day_int, old_jobs_by_day[day_int])
 
         if add_days:
             self.create_jobs(session, add_days, reset=False)
 
     def update_last_jobs(self, session, day_int, jobs):
         cutoff_time = self.real_cutoff_time(day_int)
-        jobs = sorted(jobs, key=lambda x: x.start_time, reverse=True)
+        start_time = c.EVENT_TIMEZONE.localize(datetime.strptime(f"{day_int} {self.open_time}", '%Y%m%d %H:%M:%S'))
 
+        last_job = None
         for job in jobs:
-            if job.start_time >= cutoff_time:
+            if job.start_time >= cutoff_time or job.start_time < start_time:
                 session.delete(job)
             else:
-                last_job = job
-                break
+                if not last_job or last_job.start_time < job.start_time:
+                    last_job = job
+
+        if not last_job:
+            return
 
         if self.type == c.FILL_GAPS:
             last_job_time = last_job.start_time + timedelta(minutes=last_job.duration)
@@ -946,18 +944,16 @@ class JobTemplate(MagModel, table=True):
             last_job.duration = (cutoff_time - last_job.start_time).seconds // 60
             session.add(last_job)
 
-    def fill_gap(self, session, start_time, job=None):
-        from uber.utils import date_trunc_day
+    def fill_gap(self, session, day_int, job=None):
         prev_job_end = None
-        day_int = start_time.strftime('%Y%m%d')
         cutoff_time = self.real_cutoff_time(day_int)
-        job_query = session.query(Job).filter(Job.job_template_id == self.id,
-                                              date_trunc_day(Job.start_time) == start_time.date())
+        jobs = self.jobs_by_day()[day_int]
+
         if job:
-            other_jobs = job_query.filter(Job.id != job.id).all()
+            other_jobs = [j for j in jobs if j.id != job.id]
             jobs = sorted([job] + other_jobs, key=lambda x: x.start_time)
         else:
-            jobs = job_query.order_by(Job.start_time).all()
+            jobs = sorted(jobs, key=lambda x: x.start_time)
 
         for next_job in jobs:
             if prev_job_end:
@@ -972,10 +968,45 @@ class JobTemplate(MagModel, table=True):
                     session.add(next_job)
             prev_job_end = next_job.start_time + timedelta(minutes=next_job.duration)
         self.fill_working_hours(session, jobs[-1].start_time, day_int)
-    
-    def real_cutoff_time(self, day_int):
-        cutoff_time = c.EVENT_TIMEZONE.localize(datetime.strptime(f"{day_int} {self.close_time}", '%Y%m%d %H:%M:%S'))
-        if self.close_time == time(hour=23, minute=59):
+
+    def get_origin_day_int(self, job):
+        for day_int in self.days_ints:
+            cutoff_time = self.real_cutoff_time(day_int, self.open_time, self.close_time)
+            start_time = c.EVENT_TIMEZONE.localize(datetime.strptime(f"{day_int} {self.open_time}", '%Y%m%d %H:%M:%S'))
+            if job.start_time >= start_time and job.end_time <= cutoff_time:
+                return day_int
+
+    def jobs_by_day(self, days_ints=None, open_time=None, close_time=None):
+        # Jobs 'for' one day can cross into another; this returns jobs by their origin day rather than literal day
+        from collections import defaultdict
+
+        open_time = open_time or self.open_time
+        close_time = close_time or self.close_time
+        days_ints = days_ints or self.days_ints
+        jobs_by_day = defaultdict(list)
+        job_range_by_day = {}
+
+        for day_int in days_ints:
+            cutoff_time = self.real_cutoff_time(day_int, open_time, close_time)
+            start_time = c.EVENT_TIMEZONE.localize(datetime.strptime(f"{day_int} {open_time}", '%Y%m%d %H:%M:%S'))
+            job_range_by_day[day_int] = (start_time, cutoff_time)
+
+        for job in self.jobs:
+            for day_int, (start_time, cutoff_time) in job_range_by_day.items():
+                if job.start_time >= start_time and job.end_time <= cutoff_time:
+                    jobs_by_day[day_int].append(job)
+        return jobs_by_day
+
+    def real_cutoff_time(self, day_int, open_time=None, close_time=None):
+        open_time = open_time or self.open_time
+        close_time = close_time or self.close_time
+        if close_time < open_time:
+            start_day = datetime.strptime(f"{day_int}", '%Y%m%d')
+            end_day = start_day + timedelta(days=1)
+            day_int = end_day.strftime('%Y%m%d')
+
+        cutoff_time = c.EVENT_TIMEZONE.localize(datetime.strptime(f"{day_int} {close_time}", '%Y%m%d %H:%M:%S'))
+        if close_time == time(hour=23, minute=59):
             cutoff_time += timedelta(minutes=1)
         return cutoff_time
 

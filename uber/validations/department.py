@@ -61,7 +61,7 @@ JobTemplateInfo.field_validation.validations['close_time']['optional'] = validat
 
 
 @JobTemplateInfo.field_validation('close_time')
-def close_after_open(form, field):
+def open_close_not_same(form, field):
     open_time = getattr(form, 'open_time').data
 
     if not field.data or not open_time:
@@ -69,8 +69,6 @@ def close_after_open(form, field):
 
     if field.data == open_time:
         raise StopValidation(f"The opening and closing time cannot be the same.")
-    if field.data < open_time:
-        raise StopValidation(f"The opening time must be before the closing time.")
 
 
 BulkPrintingRequestInfo.field_validation.required_fields = {
