@@ -217,7 +217,7 @@ let renderEvent = function (info) {
       return;
     }
 
-    html = `<h2 class="offset-scroll h6 mb-0 p-1" id="event-${eventInfo.id}">${eventInfo.title}</h2>`;
+    html = `<h2 class="overflow-hidden offset-scroll h6 mb-0 p-1" id="event-${eventInfo.id}">${eventInfo.title}</h2>`;
     return {
       html: html,
     }
@@ -282,6 +282,7 @@ ec = new EventCalendar(document.getElementById('event-schedule'), {
     date: '{{ current_date }}',
     slotMinTime: '{{ c.PANELS_EPOCH.hour if c.PANELS_EPOCH.date()|string in current_date else "00:00:00" }}',
     allDaySlot: false,
+    slotEventOverlap: false,
     scrollTime: '{{ c.PANELS_EPOCH.hour }}',
     headerToolbar: {
         start: 'prev,next title',
