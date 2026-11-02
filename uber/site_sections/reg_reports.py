@@ -89,9 +89,9 @@ class Root:
             filter = Attendee.is_valid == True  # noqa: E712
 
         attendees = session.query(Attendee).filter(
-            filter).join(Attendee.active_receipt).outerjoin(ModelReceipt.receipt_items).group_by(
+            filter).join(Attendee.active_receipt).outerjoin(ModelReceipt.receipt_items).outerjoin(ModelReceipt.receipt_discounts).group_by(
                 ModelReceipt.id).group_by(Attendee.id).having(
-                    Attendee.default_cost_cents != ModelReceipt.fkless_item_total_sql).options(lazyload("*"))
+                    Attendee.default_cost_cents != (ModelReceipt.fkless_item_total_sql - ModelReceipt.discount_total_sql)).options(lazyload("*"))
 
         return {
             'attendees': attendees,
