@@ -645,7 +645,7 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
         from uber.email import EmailService
 
         if self.group and self.paid == c.PAID_BY_GROUP and self.has_or_will_have_badge:
-            if not self.group.is_valid:
+            if not self.group.is_valid and (c.DEALER_BADGE_PRICE != c.INITIAL_ATTENDEE or not self.first_name):
                 self.badge_status = c.INVALID_GROUP_STATUS
             elif self.group.is_dealer and self.group.status not in c.DEALER_ACCEPTED_STATUSES:
                 self.badge_status = c.UNAPPROVED_DEALER_STATUS
