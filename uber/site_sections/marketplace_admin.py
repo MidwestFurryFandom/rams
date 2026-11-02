@@ -43,10 +43,12 @@ class Root:
 
     def form(self, session, new_app='', message='', **params):
         if new_app and 'attendee_id' in params:
-            app = ArtistMarketplaceApplication()
+            app = ArtistMarketplaceApplication(attendee_id = params['attendee_id'])
             session.add(app)
-        else:
+        elif 'id' in params:
             app = session.get(ArtistMarketplaceApplication, params['id'])
+        else:
+            app = ArtistMarketplaceApplication()
         attendee = None
 
         attendee_attrs = session.query(Attendee.id, Attendee.last_first, Attendee.badge_type, BadgeInfo.ident) \
