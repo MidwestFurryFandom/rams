@@ -528,6 +528,7 @@ def check_authnet_held_txns():
     heldTransactionListRequest.merchantAuthentication = merchantAuth
     heldTransactionListRequest.status = 'pendingApproval'
     heldTransactionListController = apicontrollers.getUnsettledTransactionListController(heldTransactionListRequest)
+    heldTransactionListController.setenvironment(c.AUTHORIZENET_ENDPOINT)
     heldTransactionListController.execute()
     heldTransactionListResponse = heldTransactionListController.getresponse()
 
@@ -561,16 +562,19 @@ def check_authnet_held_txns():
                 log.error(f"Tried to check status of transaction {charge_id} but got the error: {error}")
             else:
                 if txn_status.response.transactionStatus in ["declined", "expired", "failedReview", "voided"]:
-                    subject = f"AuthNet Held Transaction Declined: {charge_id}"
+                    subject = f"AuthNet Held Transaction(s) Declined: {charge_id}"
                     EmailService.queue_email(session, 'authnet_held_txn_admin', to=c.REGDESK_EMAIL,
                                              subject=subject, data={'txns': txns, 'status': str(txn_status.response.transactionStatus)})
                     
-                    for txn in txns:
+                for txn in txns:
+                    if txn_status.response.transactionStatus in ["declined", "expired", "failedReview", "voided"]:
                         txn.cancelled = datetime.now()
                         session.add(txn)
-                elif txn_status.response.transactionStatus in ["settledSuccessfully", "capturedPendingSettlement"]:
-                    txn.on_hold = False
-                    session.add(txn)
+                    elif txn_status.response.transactionStatus in ["settledSuccessfully", "capturedPendingSettlement"]:
+                        txn.on_hold = False
+                        session.add(txn)
+                    else:
+                        log.error(f"Unexpected transaction status when checking txn {charge_id}: {txn_status.response.transactionStatus}")
 
 
 @celery.schedule(timedelta(days=1))
