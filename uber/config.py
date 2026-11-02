@@ -1078,6 +1078,10 @@ class Config(_Overridable):
         return [opt for opt in self.AGE_GROUP_OPTS if opt[0] != self.AGE_UNKNOWN]
 
     @property
+    def CHILD_BADGE_TYPE_ENABLED(self):
+        return c.CHILD_BADGE in c.BADGES
+
+    @property
     def NOW_OR_AT_CON(self):
         return c.EPOCH.date() if date.today() <= c.EPOCH.date() else uber.utils.localized_now().date()
 
