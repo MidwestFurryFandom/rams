@@ -12,7 +12,7 @@
     <tr style="font-weight:bold">
         <td>Job</td>
         <td>When</td>
-        <td>Weight</td>
+        <td>{% if c.SHIFT_WEIGHTING_ENABLED %}Weight{% else %}Hours{% endif %}</td>
         <td>Status</td>
         <td>Rating</td>
     </tr>
@@ -20,7 +20,8 @@
         <tr>
             <td><nobr>{{ shift.job.name }} ({{ shift.job.department_name }})</nobr></td>
             <td>{{ shift.job.timespan() }}</td>
-            <td><nobr>x{{ shift.job.weight }} ({{ shift.job.weighted_hours }} hours total)</nobr></td>
+            <td>{% if c.SHIFT_WEIGHTING_ENABLED %}<nobr>x{{ shift.job.weight }} ({{ shift.job.weighted_hours }} hours total)</nobr>
+                {% else %}{{ shift.job.weighted_hours }}{% endif %}</td>
             <td>{{ shift.worked_label }}</td>
             <td>
                 {{ shift.rating_label }}
@@ -43,7 +44,7 @@
         <tr style="font-weight:bold">
             <td>Job</td>
             <td>When</td>
-            <td>Weight</td>
+            <td>{% if c.SHIFT_WEIGHTING_ENABLED %}Weight{% else %}Hours{% endif %}</td>
             <td>Status</td>
             <td>Rating</td>
         </tr>
@@ -51,7 +52,8 @@
             <tr>
                 <td><nobr>{{ shift.job.name }} ({{ shift.job.location }})</nobr></td>
                 <td>{{ shift.job.when }}</td>
-                <td><nobr>x{{ shift.job.weight }} ({{ shift.job.total_hours }} total)</nobr></td>
+                <td>{% if c.SHIFT_WEIGHTING_ENABLED %}<nobr>x{{ shift.job.weight }} ({{ shift.job.weighted_hours }} hours total)</nobr>
+                {% else %}{{ shift.job.weighted_hours }}{% endif %}</td>
                 <td>{{ shift.worked }}</td>
                 <td>
                     {{ shift.rating }}

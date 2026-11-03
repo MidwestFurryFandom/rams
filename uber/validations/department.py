@@ -32,6 +32,10 @@ BaseJobInfo.field_validation.required_fields = {
 }
 
 
+if not c.SHIFT_WEIGHTING_ENABLED:
+    BaseJobInfo.field_validation.validations['weight']['optional'] = validators.Optional()
+
+
 JobInfo.field_validation.required_fields = {
     'start_time': "Please select a start time.",
     'duration': "Please enter a duration.",
@@ -57,7 +61,7 @@ JobTemplateInfo.field_validation.validations['close_time']['optional'] = validat
 
 
 @JobTemplateInfo.field_validation('close_time')
-def close_after_open(form, field):
+def open_close_not_same(form, field):
     open_time = getattr(form, 'open_time').data
 
     if not field.data or not open_time:
@@ -65,8 +69,6 @@ def close_after_open(form, field):
 
     if field.data == open_time:
         raise StopValidation(f"The opening and closing time cannot be the same.")
-    if field.data < open_time:
-        raise StopValidation(f"The opening time must be before the closing time.")
 
 
 BulkPrintingRequestInfo.field_validation.required_fields = {
@@ -81,7 +83,7 @@ BulkPrintingRequestInfo.field_validation.required_fields = {
     'size': "Please select the size of paper to print this document on.",
     'size_text': ("Please enter the width and height of paper to print this document on.",
                   'size', lambda x: x == c.CUSTOM),
-    'link_is_shared': "Please verify that you have made sure the link to this document is publically viewable.",
+    'link_is_shared': "Please verify that you have made sure the link to this document is publicly viewable.",
 }
 
 

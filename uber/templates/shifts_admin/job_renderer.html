@@ -125,7 +125,7 @@
             .empty()
             .append(
                 $('<tr></tr>')
-                    .append('<td><b>' + job.timespan + ':</b> [x' + job.weight + '] </td>')
+                    .append('<td><b>' + job.timespan + '{% if c.SHIFT_WEIGHTING_ENABLED %}:</b> [x' + job.weight + '] {% else %}</b>{% endif %}</td>')
                     .append(
                         '<td>' +
                             (job.restricted ? '[R] ' : '') +

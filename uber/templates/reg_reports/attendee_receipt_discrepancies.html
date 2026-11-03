@@ -48,7 +48,7 @@
                 {{ attendee.default_cost|format_currency }}
             </td>
             <td id="{{ attendee.id }}-receipt-total">
-                {{ (attendee.active_receipt.item_total / 100)|format_currency }}
+                {{ ((attendee.active_receipt.item_total - attendee.active_receipt.discount_total) / 100)|format_currency }}
             </td>
             <td>{{ (attendee.active_receipt.payment_total / 100)|format_currency }}</td>
             <td>{{ (attendee.active_receipt.refund_total / 100)|format_currency }}</td>

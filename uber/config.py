@@ -163,6 +163,14 @@ class DatabaseConfigSection:
                 threadlocal.set(key, value)
         return value
 
+    def load_data(self, session=None):
+        """The stored structure merged over the defaults, before build().
+
+        A form that edits part of a section starts from this, so saving it
+        keeps the fields other forms own.
+        """
+        return self._merged(self._migrated(*self._fetch(session)))
+
     def save(self, data, session=None):
         """Store the full structure at the current version. A passed session
         is left for the caller to commit."""
@@ -1068,6 +1076,10 @@ class Config(_Overridable):
     @property
     def PREREG_AGE_GROUP_OPTS(self):
         return [opt for opt in self.AGE_GROUP_OPTS if opt[0] != self.AGE_UNKNOWN]
+
+    @property
+    def CHILD_BADGE_TYPE_ENABLED(self):
+        return c.CHILD_BADGE in c.BADGES
 
     @property
     def NOW_OR_AT_CON(self):
@@ -2105,8 +2117,6 @@ c.DOOR_PAYMENT_METHOD_OPTS = [opt for opt in c.DOOR_PAYMENT_METHOD_OPTS if opt[1
 c.DOOR_PAYMENT_METHODS = {key: val for key, val in c.DOOR_PAYMENT_METHODS.items() if val}
 
 c.TERMINAL_ID_TABLE = {k.lower().replace('-', ''): v for k, v in _config['secret']['terminal_ids'].items()}
-
-c.SHIFTLESS_DEPTS = {getattr(c, dept.upper()) for dept in c.SHIFTLESS_DEPTS}
 c.DEPT_MEMBERSHIP_SYNC = dict(_config['dept_membership_sync'])
 c.PREASSIGNED_BADGE_TYPES = [getattr(c, badge_type.upper()) for badge_type in c.PREASSIGNED_BADGE_TYPES]
 c.DEFAULT_COMPED_BADGE_TYPES = [getattr(c, badge_type.upper()) for badge_type in c.DEFAULT_COMPED_BADGE_TYPES]

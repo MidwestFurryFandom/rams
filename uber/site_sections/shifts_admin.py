@@ -171,7 +171,7 @@ class Root:
             'show_filled_shifts': cherrypy.session.get('signups_show_filled_shifts'),
             'show_restricted': show_restricted,
             'show_nonpublic': show_nonpublic,
-            'attendees': session.staffers_for_dropdown(),
+            'attendees': session.staffers_for_dropdown(department_id),
             'jobs': [job_dict(job) for job in jobs],
             'checklist': department_id and checklist
         }
@@ -258,7 +258,7 @@ class Root:
                 if session.admin_has_staffer_access(attendee) or department_id:
                     attendee.is_dept_head_here = attendee.is_dept_head_of(department_id) if department_id \
                         else attendee.is_dept_head
-                    attendee.trusted_here = attendee.trusted_in(department_id) if department_id \
+                    attendee.trusted_here = attendee.has_role_in(department_id) if department_id \
                         else attendee.has_role_somewhere
                     attendee.hours_here = attendee.weighted_hours_in(department_id)
                 else:
@@ -590,14 +590,23 @@ class Root:
         
         jobs = session.query(Job).filter(*filters).order_by(Job.start_time).order_by(Job.name)
 
-        out.writerow(["Name", "Description", "Start Time", "Duration", "Extra 15?", "Slots", "Weight", "Roles"])
+        header_row = ["Name", "Description", "Start Time", "Duration", "Extra 15?", "Slots"]
+        if c.SHIFT_WEIGHTING_ENABLED:
+            header_row.append("Weight")
+        header_row.extend(["Roles", "All or Any Roles"])
+
+        out.writerow(header_row)
         
         for job in jobs:
             duration_str = f"{job.duration // 60} hours"
             if job.duration % 60:
                 duration_str += f" {job.duration % 60} minutes"
-            out.writerow([job.name, job.description, job.start_time_local.strftime('%Y-%m-%d %-I:%M %p'),
-                          duration_str, job.extra15, job.slots, job.weight, job.required_roles_labels])
+            row = [job.name, job.description, job.start_time_local.strftime('%Y-%m-%d %-I:%M %p'),
+                   duration_str, job.extra15, job.slots]
+            if c.SHIFT_WEIGHTING_ENABLED:
+                row.append(job.weight)
+            row.extend([job.required_roles_labels, "All" if job.all_roles_required else "Any"])
+            out.writerow()
 
     @site_mappable
     @csv_file

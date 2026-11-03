@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import pathlib
 
 from pytz import UTC
-from sqlalchemy.orm import joinedload, subqueryload
+from sqlalchemy.orm import defaultload, joinedload, subqueryload
 
 from uber.config import c
 from uber import decorators
@@ -14,6 +14,7 @@ from uber.models import (AdminAccount, Attendee, AttendeeAccount, ArtShowApplica
                          Email, Group, GuestGroup, IndieGame, IndieJudge, IndieStudio, ArtistMarketplaceApplication, MITSTeam,
                          MITSApplicant, ReceiptInfo, PanelApplication, PanelApplicant, PromoCode, PromoCodeGroup, LotteryApplication,
                          RoomAssignment, Shift)
+from uber.models.hotel import HotelRoomInventory, LotteryHotel
 from uber.utils import after, before, days_after, days_before, days_between, localized_now, DeptChecklistConf
 
 log = logging.getLogger(__name__)
@@ -53,7 +54,11 @@ class AutomatedEmailFixture:
                    joinedload(MITSTeam.games), joinedload(MITSTeam.schedule)],
         MITSApplicant: [subqueryload(MITSApplicant.attendee), subqueryload(MITSApplicant.team)],
         PanelApplication: [subqueryload(PanelApplication.applicants).subqueryload(PanelApplicant.attendee)],
-        GuestGroup: [joinedload(GuestGroup.group)]
+        GuestGroup: [joinedload(GuestGroup.group)],
+        # Each room joins its hotel, so an 800 KB floor map repeated on 1,420 room
+        # rows took a query over all rooms to 1.1 GB. No room email reads the map.
+        RoomAssignment: [defaultload(RoomAssignment.inventory).defaultload(HotelRoomInventory.hotel)
+                         .defer(LotteryHotel.map_yaml).defer(LotteryHotel.map_svg)],
     }
 
     def __init__(
@@ -1128,6 +1133,36 @@ AutomatedEmailFixture(
     sender=c.HOTEL_LOTTERY_EMAIL,
 )
 
+# Partition rooms have no LotteryApplication, so the award email never
+# reaches them. Admins assigning into a partition save the room as MANUAL,
+# not PARTITION_GRANT, so both reasons count. The one-hour wait gives the
+# assigner time to fix dates or billing. generate_missing_emails pauses five
+# minutes after each fixture, so the real wait is often longer. Master-billed
+# rooms stay ASSIGNED and get the email without the card request; secured card
+# rooms are skipped.
+AutomatedEmailFixture(
+    RoomAssignment,
+    f'Your {c.EVENT_NAME_AND_YEAR} hotel room assignment',
+    'hotel/partition_room_assigned.html',
+    "lambda ra: ra.partition_id and ra.assignment_reason in [c.PARTITION_GRANT, c.MANUAL] \
+        and ra.status == c.ASSIGNED and (ra.needs_card or not ra.require_cc) \
+        and ra.created < datetime.now(UTC) - timedelta(hours=1)",
+    'hotel_partition_room_assigned',
+    sender=c.HOTEL_LOTTERY_EMAIL,
+)
+
+# Queued by uber.hotel.service.notify_guest_of_room_change. The send filter
+# holds it until the room has gone ten minutes without a change, so a run of
+# edits produces one email with the final state.
+AutomatedEmailFixture(
+    RoomAssignment,
+    f'Your {c.EVENT_NAME_AND_YEAR} hotel room was updated',
+    'hotel/partition_room_updated.html', None,
+    'hotel_partition_room_updated',
+    send_filter="lambda ra: ra.last_updated < datetime.now(UTC) - timedelta(minutes=10)",
+    sender=c.HOTEL_LOTTERY_EMAIL,
+)
+
 HotelLotteryEmailFixture(
     f'{c.EVENT_NAME_AND_YEAR} ' + '{app.entry_type_label} Lottery Confirmation',
     'hotel/hotel_lottery_entry.html', None,
@@ -1201,7 +1236,7 @@ HotelLotteryEmailFixture(
     'hotel_lottery_inventory_changed_owner'
 )
 HotelLotteryEmailFixture(
-    f'{c.EVENT_NAME} Hotel Lottery - Room Dates Updated',
+    f'Your {c.EVENT_NAME_AND_YEAR} hotel room dates were updated',
     'hotel/waitlist_fulfilled.html', None,
     'hotel_lottery_waitlist_fulfilled'
 )
@@ -1809,6 +1844,8 @@ if c.MITS_START:
 
 class PanelAppEmailFixture(AutomatedEmailFixture):
     def __init__(self, subject, template, filter, ident, **kwargs):
+        from uber.custom_tags import email_only
+
         panel_filter = None
         if filter:
             if callable(filter):
@@ -1824,6 +1861,7 @@ class PanelAppEmailFixture(AutomatedEmailFixture):
             panel_filter,
             ident,
             sender=kwargs.pop('sender', c.PANELS_EMAIL),
+            extra_data=kwargs.pop('extra_data', {'dept_name': 'Panels', 'dept_email': email_only(c.PANELS_EMAIL)}),
             **kwargs)
 
 

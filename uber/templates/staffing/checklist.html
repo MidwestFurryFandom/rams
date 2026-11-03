@@ -22,7 +22,7 @@
   <ul class="mb-0">
     {% for req in _violations %}
       {% if req.kind == c.CORE %}
-        <li>Reach at least {{ req.required_weighted_hours }} weighted shift hours (you have {{ attendee.weighted_hours }}) - required for the {{ req.night_date|date("%A %b %-d") }} core night.</li>
+        <li>Reach at least {{ req.required_weighted_hours }}{% if c.SHIFT_WEIGHTING_ENABLED %} weighted{% endif %} shift hours (you have {{ attendee.weighted_hours }}) - required for the {{ req.night_date|date("%A %b %-d") }} core night.</li>
       {% else %}
         <li>Pick up a shift overlapping {{ req.shift_window_start|datetime_local("%a %b %-d %-I:%M%p") }}&nbsp;-&nbsp;{{ req.shift_window_end|datetime_local("%-I:%M%p") }} ({{ req.kind_label }}).</li>
       {% endif %}

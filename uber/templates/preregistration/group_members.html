@@ -181,7 +181,7 @@
                 {% endif %}
             </td>
             <td>
-                {% if not attendee.cannot_abandon_badge_reason and not attendee.admin_account and not attendee.dept_memberships_with_inherent_role
+                {% if group.status not in [c.CANCELLED, c.DECLINED] and not attendee.cannot_abandon_badge_reason and not attendee.admin_account and not attendee.dept_memberships_with_inherent_role
                   or attendee.paid != c.PAID_BY_GROUP %}
                   <form method="post"
                         class="{% if attendee.paid == c.PAID_BY_GROUP %}unset-group-member{% else %}remove-group-member{% endif %}"

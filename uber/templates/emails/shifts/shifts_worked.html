@@ -25,7 +25,7 @@ We couldn't have done it without the help of every single one of our volunteers.
         <td>Job</td>
         <td>Dept</td>
         <td>Hours</td>
-        <td>Weight</td>
+        {% if c.SHIFT_WEIGHTING_ENABLED %}<td>Weight</td>{% endif %}
         <td>Worked</td>
     </tr>
     {% for shift in attendee.shifts|sortBy('job.start_time') %}
@@ -33,7 +33,7 @@ We couldn't have done it without the help of every single one of our volunteers.
             <td>{{ shift.job.name }}</td>
             <td>{{ shift.job.department_name }}</td>
             <td>{{ shift.job.duration / 60 }}</td>
-            <td>(x{{ shift.job.weight }})</td>
+            {% if c.SHIFT_WEIGHTING_ENABLED %}<td>(x{{ shift.job.weight }})</td>{% endif %}
             <td>{% if shift.worked == c.SHIFT_UNMARKED %}Unconfirmed by manager
             {% elif shift.worked == c.SHIFT_WORKED %}Yes
             {% elif shift.worked == c.SHIFT_UNWORKED %}No{% endif %}</td>

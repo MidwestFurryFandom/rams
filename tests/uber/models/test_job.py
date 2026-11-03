@@ -15,12 +15,12 @@ def test_real_duration():
     assert Job(duration=2).real_duration == 2
     assert Job(duration=2, extra15=True).real_duration == 2.25
 
-
-def test_weighted_hours(monkeypatch):
-    monkeypatch.setattr(Job, 'real_duration', 2)
-    assert Job(weight=1).weighted_hours == 2
-    assert Job(weight=1.5).weighted_hours == 3
-    assert Job(weight=2).weighted_hours == 4
+if c.SHIFT_WEIGHTING_ENABLED:
+    def test_weighted_hours(monkeypatch):
+        monkeypatch.setattr(Job, 'real_duration', 2)
+        assert Job(weight=1).weighted_hours == 2
+        assert Job(weight=1.5).weighted_hours == 3
+        assert Job(weight=2).weighted_hours == 4
 
 
 def test_total_hours(monkeypatch):

@@ -165,7 +165,8 @@ class Root:
 
     @csv_file
     def volunteers_with_worked_hours(self, out, session):
-        out.writerow(['Badge #', 'Full Name', 'Email Address', 'Weighted Hours Scheduled', 'Weighted Hours Worked'])
+        weighted_or_not = 'Weighted ' if c.SHIFT_WEIGHTING_ENABLED else ''
+        out.writerow(['Badge #', 'Full Name', 'Email Address', f'{weighted_or_not}Hours Scheduled', f'{weighted_or_not}Hours Worked'])
         for a in session.staffers():
             if a.worked_hours > 0:
                 out.writerow([a.badge_num, a.full_name, a.email, a.weighted_hours, a.worked_hours])
@@ -184,7 +185,7 @@ class Root:
                     if not shift.job.restricted:
                         for dept in attendee.assigned_depts:
                             for minute in shift.job.minutes:
-                                if attendee.trusted_in(dept.id) and minute in untaken[dept]:
+                                if attendee.has_role_in(dept.id) and minute in untaken[dept]:
                                     overlapping[shift.job].update(untaken[dept][minute])
                 if overlapping:
                     flagged.append([attendee, sorted(overlapping.items(), key=lambda tup: tup[0].start_time)])

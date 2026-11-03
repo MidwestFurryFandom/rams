@@ -27,7 +27,7 @@ app, c.PAGE_PATH,
     </div>
     {% elif c.SIGNNOW_MARKETPLACE_TEMPLATE_ID and app.status == c.ACCEPTED %}
     <div class="col text-end">
-    <em>This dealer has not been emailed a SignNow document yet.</em>
+    <em>This applicant has not been emailed a SignNow document yet.</em>
     <a class="btn btn-success" href="../services/send_signnow_link?id={{ app.id }}&cls=ArtistMarketplaceApplication&return_to=../marketplace_admin/form">Send SignNow Link</a>
     </div>
   {% endif %}

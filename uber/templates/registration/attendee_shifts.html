@@ -105,8 +105,8 @@
                 <b>[not checked in]</b>
             {% endif %}
         {% endif %}
-        ({{ attendee.weighted_hours }} weighted hours,
-        {{ (attendee.shift_minutes|length + attendee.nonshift_minutes) / 60 }} actual hours): </b>
+        ({% if c.SHIFT_WEIGHTING_ENABLED %}{{ attendee.weighted_hours }} weighted hours,
+          {{ (attendee.shift_minutes|length + attendee.nonshift_minutes) / 60 }} actual hours{% else %}{{ attendee.weighted_hours }} hours{% endif %}): </b>
         {% if c.AT_OR_POST_CON %}<br />{{ attendee.worked_hours }} hours worked.{% endif %}
     <br/> <br/>
     <table width="95%" align="center" class="table table-hover">
@@ -117,7 +117,7 @@
           <th>Start</th>
           <th>End</th>
           <th>Hours</th>
-          <th>Weighted Total</th>
+          {% if c.SHIFT_WEIGHTING_ENABLED %}<th>Weighted Total</th>{% endif %}
           <th>Status</th>
           <th></th>
           <th></th>
@@ -133,8 +133,8 @@
             </td>
             <td>{{ shift.job.start_time|time_day_local }}</td>
             <td>{{ shift.job.end_time|time_day_local }}</td>
-            <td>{{ shift.job.duration / 60 }} (x{{ shift.job.weight }})</td>
-            <td>{{ shift.job.weighted_hours }}</td>
+            <td>{{ shift.job.duration / 60 }}{% if c.SHIFT_WEIGHTING_ENABLED %} (x{{ shift.job.weight }}){% endif %}</td>
+            {% if c.SHIFT_WEIGHTING_ENABLED %}<td>{{ shift.job.weighted_hours }}</td>{% endif %}
             <td id="shift_status_{{ shift.id }}"></td>
             <td id="shift_rating_{{ shift.id }}"></td>
             <td class="text-end">

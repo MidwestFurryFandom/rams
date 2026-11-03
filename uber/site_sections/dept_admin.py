@@ -62,6 +62,7 @@ class Root:
                 selectinload(Department.dept_roles).selectinload(DeptRole.dept_memberships),
                 selectinload(Department.members).selectinload(Attendee.shifts).joinedload(Shift.job),
                 selectinload(Department.members).joinedload(Attendee.admin_account),
+                selectinload(Department.members).joinedload(Attendee.assigned_depts),
                 selectinload(Department.dept_heads).selectinload(Attendee.dept_memberships),
                 selectinload(Department.pocs).selectinload(Attendee.dept_memberships),
                 selectinload(Department.checklist_admins).selectinload(Attendee.dept_memberships)
@@ -229,7 +230,8 @@ class Root:
     def dept_members_export(self, out, session, department_id, message='', **params):
         department = session.get(Department, department_id)
         headers = ['Name', 'Legal Name', 'Email', 'Phone Number', 'Emergency Contact',
-                   'Weighted Hours', 'Badge Status', 'Placeholder', 'Has Shifts', 'Roles']
+                   'Weighted Hours' if c.SHIFT_WEIGHTING_ENABLED else 'Hours', 'Badge Status',
+                   'Placeholder', 'Has Shifts', 'Roles']
 
         out.writerow(headers)
         for attendee in department.members:

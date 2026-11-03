@@ -7,7 +7,7 @@ To keep your hotel space, please address the following before the convention sta
 <ul>
 {% for req in attendee.shift_compliance_violations %}
   {% if req.kind == c.CORE %}
-  <li>Reach at least {{ req.required_weighted_hours }} weighted shift hours by {{ req.night_date|date("%A, %B %-d") }} (you currently have {{ attendee.weighted_hours }}).</li>
+  <li>Reach at least {{ req.required_weighted_hours }}{% if c.SHIFT_WEIGHTING_ENABLED %} weighted{% endif %} shift hours by {{ req.night_date|date("%A, %B %-d") }} (you currently have {{ attendee.weighted_hours }}).</li>
   {% else %}
   <li>Pick up a shift overlapping {{ req.shift_window_start|datetime_local("%A, %B %-d %-I:%M%p") }} - {{ req.shift_window_end|datetime_local("%-I:%M%p") }} ({{ req.kind_label }}).</li>
   {% endif %}

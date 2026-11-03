@@ -19,7 +19,7 @@ import six
 import sqlalchemy
 from dateutil import parser as dateparser
 from pytz import UTC
-from sqlalchemy import and_, func, or_, create_engine
+from sqlalchemy import and_, case, func, or_, create_engine
 from sqlalchemy.dialects.postgresql.json import JSONB
 from sqlalchemy.event import listen
 from sqlalchemy.exc import IntegrityError, NoResultFound
@@ -429,8 +429,14 @@ class MagModel(SQLModel):
         return getattr(self, '_relation_ids', {}).get(relation, (None, None))
 
     def _set_relation_ids(self, relation, ModelClass, ids):
+        # TODO: The relation_ids code is managing data outside of the SQLAlchemy session workflow and should be removed
+        from sqlalchemy.orm.attributes import flag_dirty
+
         _relation_ids = getattr(self, '_relation_ids', {})
         _relation_ids[relation] = (ModelClass, ids)
+        if self.session and self not in self.session.dirty and self not in self.session.new:
+            flag_dirty(self)
+
         setattr(self, '_relation_ids', _relation_ids)
 
     @presave_adjustment
@@ -1833,12 +1839,21 @@ class UberSession(sqlalchemy.orm.Session):
                     subqueryload(Job.shifts).subqueryload(Shift.attendee).subqueryload(Attendee.group)) \
                 .order_by(Job.start_time, Job.name)
 
-        def staffers_for_dropdown(self):
-            query = self.query(Attendee.id, Attendee.full_name).filter(Attendee.is_valid == True,
-                                                                       Attendee.staffing == True)
+        def staffers_for_dropdown(self, department_id=None):
+            query = self.query(Attendee.id, Attendee.full_name, BadgeInfo.ident).filter(
+                Attendee.is_valid == True, Attendee.staffing == True).outerjoin(Attendee.active_badge)
+            total_hours = self.query(Attendee.id, func.sum(Job.weight * (Job.duration + case((Job.extra15 == True, 15), else_=0))) / 60).filter(
+                Attendee.is_valid == True, Attendee.staffing == True).outerjoin(Attendee.shifts).outerjoin(Shift.job).group_by(Attendee.id)
+            
+            if department_id:
+                query = query.join(Attendee.assigned_depts).filter(Department.id == department_id)
+                total_hours = total_hours.join(Attendee.assigned_depts).filter(Department.id == department_id)
+
+            total_hours_dict = {id: hours for id, hours in total_hours}
+
             return [
-                {'id': id, 'full_name': full_name.title()}
-                for id, full_name in query.order_by(Attendee.full_name)]
+                {'id': id, 'full_name': full_name.title(), 'badge_num': badge_num,
+                 'total_hours': total_hours_dict[id]} for id, full_name, badge_num in query.order_by(Attendee.full_name)]
 
         def dept_heads(self, department_id=None):
             if department_id:
@@ -2118,8 +2133,11 @@ class UberSession(sqlalchemy.orm.Session):
             ribbon_to_use = ','.join(map(str, listify(new_ribbon_type))) if new_ribbon_type else group.new_ribbon
 
             if int(new_badge_type) in c.PREASSIGNED_BADGE_TYPES and c.AFTER_PRINTED_BADGE_DEADLINE and diff > 0:
-                return 'Custom badges have already been ordered, so you will need to select a different badge type'
-            elif diff > 0:
+                admin = self.current_admin_account()
+                if not admin.is_super_admin:
+                    return 'Custom badges have already been ordered, so you will need to select a different badge type'
+
+            if diff > 0:
                 for i in range(diff):
                     new_attendee = Attendee(
                         badge_type=new_badge_type,

@@ -645,7 +645,7 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
         from uber.email import EmailService
 
         if self.group and self.paid == c.PAID_BY_GROUP and self.has_or_will_have_badge:
-            if not self.group.is_valid:
+            if not self.group.is_valid and (c.DEALER_BADGE_PRICE != c.INITIAL_ATTENDEE or not self.first_name):
                 self.badge_status = c.INVALID_GROUP_STATUS
             elif self.group.is_dealer and self.group.status not in c.DEALER_ACCEPTED_STATUSES:
                 self.badge_status = c.UNAPPROVED_DEALER_STATUS
@@ -720,7 +720,7 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
         if self.badge_type == c.PSEUDO_DEALER_BADGE:
             self.ribbon = add_opt(self.ribbon_ints, c.DEALER_RIBBON)
         
-        if self.badge_type == c.PSEUDO_UNDER_13_BADGE:
+        if c.CHILD_BADGE_TYPE_ENABLED and self.badge_type == c.PSEUDO_UNDER_13_BADGE:
             self.badge_type = c.CHILD_BADGE
             self.ribbon = add_opt(self.ribbon_ints, c.UNDER_13)
 
@@ -894,7 +894,7 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
 
     @presave_adjustment
     def child_badge(self):
-        if self.age_now_or_at_con is not None and self.age_now_or_at_con < 18 \
+        if c.CHILD_BADGE_TYPE_ENABLED and self.age_now_or_at_con is not None and self.age_now_or_at_con < 18 \
                 and self.badge_type == c.ATTENDEE_BADGE:
             self.badge_type = c.CHILD_BADGE
             self.session.update_badge(self)
@@ -2225,9 +2225,6 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
             return False
         return any(m.department_id == department_id for m in self.dept_memberships)
 
-    def trusted_in(self, department_id):
-        return self.has_role_in(department_id)
-
     def can_admin_dept_for(self, department):
         return (self.admin_account and self.admin_account.full_dept_admin) \
             or self.has_inherent_role_in(department)
@@ -2293,6 +2290,15 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
         if not department_id:
             return False
         return any(m.department_id == department_id for m in self.dept_memberships_with_role)
+
+    def roles_in(self, department_id):
+        if not department_id:
+            return []
+
+        for membership in self.dept_memberships_with_role:
+            if membership.department_id == department_id:
+                return membership.dept_roles
+        return []
 
     def has_required_roles(self, job):
         if not job.required_roles:

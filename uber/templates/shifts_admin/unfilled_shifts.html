@@ -21,7 +21,7 @@ Please select a department above to view its unfilled shifts.
       <select id="attendee" class="form-select">
           <option value="">Select a volunteer</option>
           {% for attendee in attendees %}
-              <option value="{{ attendee.id }}">{{ attendee.full_name }}</option>
+              <option value="{{ attendee.id }}">{{ attendee.full_name }}{% if attendee.badge_num %} (#{{ attendee.badge_num }}){% endif %} - {{ attendee.total_hours or 0 }} Hours</option>
           {% endfor %}
       </select>
   </div>

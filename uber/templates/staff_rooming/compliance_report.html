@@ -79,7 +79,7 @@
     <tr>
       <th>Staffer</th>
       <th>Departments</th>
-      <th>Weighted Hours</th>
+      <th>{% if c.SHIFT_WEIGHTING_ENABLED %}Weighted {% endif %}Hours</th>
       <th>Violations</th>
     </tr>
   </thead>

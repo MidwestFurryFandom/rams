@@ -62,6 +62,7 @@
     </a>
 </p>
 
+<div class="card card-body">
 {%- set requesting_attendees = department.unassigned_requesting_attendees|selectattr('is_valid')
     if requested_any else department.unassigned_explicitly_requesting_attendees|selectattr('is_valid') -%}
 
@@ -120,5 +121,6 @@
 {% else %}
   <div><i>No unassigned volunteers have requested to help in the {{ department.name }} department yet.</i></div>
 {% endif %}
+</div>
 
 {% endblock %}

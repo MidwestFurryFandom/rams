@@ -7,7 +7,7 @@
 
 <div style="text-align:center ; font-style:italic">
     <a href="login">Click here</a> to log in as someone else. <br/>
-    <a href="printable">Click here</a> to see a printable schedule of the {{ attendee.weighted_hours }} weighted hours worth of shifts you are signed up for.
+    <a href="printable">Click here</a> to see a printable schedule of the {{ attendee.weighted_hours }}{% if c.SHIFT_WEIGHTING_ENABLED %} weighted{% endif %} hours worth of shifts you are signed up for.
 </div>
 
 <br/>
@@ -23,8 +23,10 @@ If you cannot make it to one or more of your existing shifts, contact us at {{ c
             <th>Hours</th>
             <th>Department</th>
             <th>Job</th>
+            {% if c.SHIFT_WEIGHTING_ENABLED %}
             <th>Weight</th>
             <th>Weighted Total</th>
+            {% endif %}
             <th></th>
         </tr>
     </thead>
@@ -35,8 +37,8 @@ If you cannot make it to one or more of your existing shifts, contact us at {{ c
             <td>{{ job.duration / 60 }}</td>
             <td>{{ job.department_name }}</td>
             <td>{{ job.name }}</td>
-            <td>(x{{ job.weight }})</td>
-            <td>{{ job.weighted_hours }} hours</td>
+            {% if c.SHIFT_WEIGHTING_ENABLED %}<td>(x{{ job.weight }})</td>
+            <td>{{ job.weighted_hours }} hours</td>{% endif %}
             <td>
                 {% if job.taken %}
                     Signed Up!
