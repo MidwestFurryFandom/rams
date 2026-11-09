@@ -138,21 +138,6 @@ class AdminAccount(MagModel, table=True):
         except Exception:
             return None
 
-    @staticmethod
-    def get_access_set(id=None, include_read_only=False, full=False):
-        try:
-            from uber.models import Session
-            with Session() as session:
-                id = id or cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None))
-                account = session.admin_account(id)
-                if full:
-                    return account.full_access_set
-                if include_read_only:
-                    return account.read_or_write_access_set
-                return account.write_access_set
-        except Exception:
-            return set()
-
     @classproperty
     def _extra_apply_attrs(cls):
         return set(['access_groups_ids'])

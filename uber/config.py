@@ -458,8 +458,27 @@ class Config(_Overridable):
                 Attendee.has_badge == True).count()  # noqa: E712
         return count
 
+    @request_cached_property
+    @dynamic
+    def current_admin_access(self):
+        # Avoids excessive round-trips to the DB by caching what site sections and pages the logged-in admin can access
+        site_section_access = {}
+        from uber.models import Session
+        with Session() as session:
+            id = cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None))
+            if not id:
+                return site_section_access
+            account = session.admin_account(id)
+            site_section_access['full'] = account.full_access_set
+            site_section_access['read_write'] = account.read_or_write_access_set
+            site_section_access['write'] = account.write_access_set
+        return site_section_access
+
     def has_section_or_page_access(self, page_path='', include_read_only=False, full=False):
-        access = uber.models.AdminAccount.get_access_set(include_read_only=include_read_only, full=full)
+        access = self.current_admin_access['write']
+        if full or include_read_only:
+            access = self.current_admin_access['full'] if full else self.current_admin_access['read_write']
+
         page_path = page_path or self.PAGE_PATH
 
         section = page_path.replace(page_path.split('/')[-1], '').strip('/')
@@ -1374,17 +1393,7 @@ class Config(_Overridable):
     @request_cached_property
     @dynamic
     def ADMIN_ACCESS_SET(self):
-        return uber.models.AdminAccount.get_access_set(include_read_only=True)
-
-    @request_cached_property
-    @dynamic
-    def ADMIN_WRITE_ACCESS_SET(self):
-        return uber.models.AdminAccount.get_access_set()
-    
-    @request_cached_property
-    @dynamic
-    def ADMIN_FULL_ACCESS_SET(self):
-        return uber.models.AdminAccount.get_access_set(full=True)
+        return self.current_admin_access['read_write']
 
     @request_cached_property
     @dynamic
@@ -1742,10 +1751,10 @@ class Config(_Overridable):
                 return self.has_section_or_page_access(include_read_only=True)
 
             if access_name.startswith('full_'):
-                return access_name[5:] in self.ADMIN_FULL_ACCESS_SET
+                return access_name[5:] in self.current_admin_access['full']
             if access_name.endswith('_read'):
-                return access_name[:-5] in self.ADMIN_ACCESS_SET
-            return access_name in self.ADMIN_WRITE_ACCESS_SET
+                return access_name[:-5] in self.current_admin_access['read_write']
+            return access_name in self.current_admin_access['write']
         elif name.endswith('_COUNT'):
             item_check = name.rsplit('_', 1)[0]
             badge_type = getattr(self, item_check, None)
