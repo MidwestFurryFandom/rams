@@ -114,7 +114,8 @@ def decline_and_convert_dealer_group(session, group, status=c.DECLINED, admin_no
                 EmailService.queue_email(
                     session, ident, attendee,
                     data={'group': group, 'other_badges': assigned_badges - 1,
-                          'unregistered_badges': group.unregistered_badges > 0})
+                          'unregistered_badges': group.unregistered_badges > 0,
+                          'closing_waitlist': closing_waitlist})
                 emails_sent += 1
 
             badges_converted += 1

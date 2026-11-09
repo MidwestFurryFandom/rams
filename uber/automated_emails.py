@@ -755,7 +755,7 @@ if c.DEALER_REG_START:
     MarketplaceEmailFixture(
         f'Your {c.EVENT_NAME} {c.DEALER_APP_TERM.capitalize()} has been declined',
         'dealers/declined.txt',
-        "lambda g: g.status == c.DECLINED",
+        "lambda g: g.status == c.DECLINED and g.badges_purchased > 0",
         'dealer_reg_declined',
         shared_ident='dealer_reg_declined')
 
