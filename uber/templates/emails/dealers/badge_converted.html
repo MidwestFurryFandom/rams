@@ -4,7 +4,7 @@
 {{ attendee.first_name }},
 
 <br/><br/>
-{% if group.status not in [c.CANCELLED, c.DECLINED] %}
+{% if closing_waitlist %}
 I am sorry to inform you that only a few spaces opened up for the waitlist, and unfortunately your group ({{ group.name }}) did not make it into the {{ c.EVENT_NAME }} {{ c.DEALER_LOC_TERM }} this year, which is why your application is now being declined.
 
 <br/><br/>If you would still like to attend {{ c.EVENT_NAME }} as an attendee,
@@ -20,7 +20,7 @@ we have reserved a badge for you{% if c.PRICE_BUMPS and attendee.badge_cost and 
   
 {% if c.TRANSFERABLE_BADGE_TYPES %}<br/><br/>Additionally, this badge is reserved for only you and thus <strong>cannot be transferred</strong> to anyone else at any time.{% endif %}
 
-<p>Please go ahead and confirm or decline <a href="{{ c.URL_BASE }}/preregistration/confirm?id={{ attendee.id }}">your registration</a>.{% if c.DEALER_BADGE_DEADLINE %} All badges not confirmed by {{ c.DEALER_BADGE_DEADLINE|datetime_local }} will be dropped automatically.{% endif %} There is no need to respond to this email. We hope to see you this year!</p>
+<br/><br/>Please go ahead and confirm or decline <a href="{{ c.URL_BASE }}/preregistration/confirm?id={{ attendee.id }}">your registration</a>.{% if c.DEALER_BADGE_DEADLINE %} All badges not confirmed by {{ c.DEALER_BADGE_DEADLINE|datetime_local }} will be dropped automatically.{% endif %} There is no need to respond to this email. We hope to see you this year!
 
 <br/><br/>-----
 
