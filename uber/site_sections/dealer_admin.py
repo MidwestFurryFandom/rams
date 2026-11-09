@@ -77,8 +77,7 @@ def decline_and_convert_dealer_group(session, group, status=c.DECLINED, admin_no
     """
     group.status = status
     if not admin_note:
-        if c.DELETE_DECLINED_GROUPS:
-            admin_note = f'Badge from {c.DEALER_REG_TERM} "{group.name}" converted by {AdminAccount.admin_name() or "server admin"}'
+        admin_note = f'Badge from {c.DEALER_REG_TERM} "{group.name}" declined and converted by {AdminAccount.admin_name() or "server admin"}'
 
         if closing_waitlist:
             admin_note += f' closing {c.DEALER_TERM} waitlist.'
