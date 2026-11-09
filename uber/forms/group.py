@@ -51,6 +51,14 @@ class ContactInfo(AddressForm):
     phone = TelField('Phone Number',
                      render_kw={'placeholder': 'A phone number we can use to contact you during the event'})
 
+    def get_non_admin_locked_fields(self, group):
+        locked_fields = super().get_non_admin_locked_fields(group)
+
+        if not group.is_dealer or group.is_new or group.status in c.DEALER_EDITABLE_STATUSES:
+            return locked_fields
+
+        return locked_fields + list(self._fields.keys())
+
 
 class TableInfo(GroupInfo):
     name = StringField('Table Name')
