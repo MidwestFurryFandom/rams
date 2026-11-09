@@ -288,7 +288,7 @@
                 {% if c.ATTENDEE_ACCOUNTS_ENABLED %}<td>{{ attendee.managers[0]|form_link if attendee.managers else 'None' }}</td>{% endif %}
                 <td id="group_{{ attendee.id }}">
                     {% if attendee.group %}
-                    <a href="../group_admin/form?id={{ attendee.group.id }}">{{ attendee.group.name }}</a>
+                    {{ attendee.group|form_link }}
                     {% elif attendee.group_name %}
                     {{ attendee.group_name }}
                     {% endif %}
