@@ -1428,7 +1428,7 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
             return "This badge has already been picked up."
         if self.badge_type in [c.STAFF_BADGE, c.CONTRACTOR_BADGE]:
             return f"Please contact {email_only(c.STAFF_EMAIL)} to cancel or defer your badge."
-        if self.badge_type in c.BADGE_TYPE_PRICES and c.AFTER_EPOCH:
+        if self.badge_type in c.BADGE_TYPE_PRICES and (c.AFTER_PREREG_TAKEDOWN or c.AFTER_EPOCH):
             return f"Please contact {email_only(c.REGDESK_EMAIL)} to cancel your badge."
 
         reason = ""

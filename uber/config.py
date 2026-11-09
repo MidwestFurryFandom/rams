@@ -617,7 +617,7 @@ class Config(_Overridable):
         from uber.models import Session, Group
         with Session() as session:
             return session.query(Group).filter(
-                Group.tables > 0,
+                Group.is_dealer == True,
                 Group.cost > 0,
                 Group.status == self.UNAPPROVED).count()
 

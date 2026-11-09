@@ -206,7 +206,7 @@ def decline_and_convert_dealer_groups():
     from uber.site_sections.groups import decline_and_convert_dealer_group
     with Session() as session:
         groups = session.query(Group) \
-            .filter(Group.tables > 0, Group.status == c.WAITLISTED) \
+            .filter(Group.is_dealer == True, Group.status == c.WAITLISTED) \
             .options(
                 subqueryload(Group.attendees).subqueryload(Attendee.admin_account),
                 subqueryload(Group.attendees).subqueryload(Attendee.shifts)) \

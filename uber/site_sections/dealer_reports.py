@@ -65,7 +65,7 @@ class Root:
             'What They Sell'
         ])
 
-        dealer_groups = session.query(Group).filter(Group.tables > 0).all()
+        dealer_groups = session.query(Group).filter(Group.is_dealer == True).all()
         for group in dealer_groups:
             full_name = group.leader.full_name if group.leader else ''
             out.writerow([
@@ -176,7 +176,7 @@ class Root:
 
     @xlsx_file
     def seller_comptroller_info(self, out, session):
-        dealer_groups = session.query(Group).filter(Group.tables > 0).all()
+        dealer_groups = session.query(Group).filter(Group.is_dealer == True).all()
         rows = []
         for group in dealer_groups:
             if group.status in c.DEALER_ACCEPTED_STATUSES and group.is_dealer:

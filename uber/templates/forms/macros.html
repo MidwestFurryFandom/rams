@@ -84,11 +84,12 @@
   {% endif %}
 {% endfor %}
 
-{% if locked_fields|default(None, true) and field.name in locked_fields and not upgrade_modal %}
-{% set _ = custom_kwargs.update({'readonly': true}) %}
-{% endif %}
-
 {% set is_readonly = ('readonly' in kwargs and kwargs['readonly'] == True) or 'readonly' in field.render_kw %}
+
+{% if locked_fields|default(None, true) and field.name in locked_fields and not upgrade_modal %}
+{% set _ = custom_kwargs.update({'readonly': True}) %}
+{% set is_readonly = True %}
+{% endif %}
 
 {% set text_below_field %}
 {% if not field_only %}
@@ -143,6 +144,15 @@
   </div>
   {{ text_below_field }}
 </fieldset>
+{% elif 'Select' in widget %}
+  {% if is_readonly %}
+  <input type="hidden" name="{{ field.id }}" value="{{ field.data }}" />
+  {{ field(disabled=custom_kwargs.pop('disabled') if 'disabled' in custom_kwargs else true, **custom_kwargs) }}
+  {% else %}
+  {{ field(**custom_kwargs) }}
+  {% endif %}
+  {{ text_below_field }}
+  {% if caller %}{{ caller() }}{% endif %}
 {% else %}
   {{ field(**custom_kwargs) }}
   {{ text_below_field }}

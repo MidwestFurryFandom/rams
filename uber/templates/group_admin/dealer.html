@@ -3,6 +3,25 @@
         window.location = "index?order={{ order }}&show=" + $(dropdown).val();
     }
 
+    var convertDeclinedConfirm = function() {
+        bootbox.confirm({
+        title: 'Convert All Declined {{ c.DEALER_TERM|title }}s?',
+        message: '<p>Are you sure you want to convert all declined {{ c.DEALER_TERM }} badges?</p>' +
+          '<p>This will mark all currently declined groups for converting to individual badges. ' +
+          'The task to do this runs nightly and will email each declined {{ c.DEALER_TERM }}.</p>' +
+          '<p>For more information, check the "What does this do?" link under the group status on any declined {{ c.DEALER_APP_TERM }}.</p>',
+        buttons: {
+          confirm: { label: 'Convert Declined {{ c.DEALER_TERM|title }}s', className: 'btn-danger' },
+          cancel: { label: 'Nevermind', className: 'btn-outline-secondary' }
+        },
+        callback: function (result) {
+            if(result) {
+                window.location = "../dealer_admin/convert_declined";
+            }
+        }
+        });
+    }
+
     $(document).ready(function () {
         $('div.dataTables_filter input').focus();
     });
@@ -13,7 +32,7 @@
     <span class="pull-right">
       <a href="index?group_type=dealer&show_all=true" class="btn btn-info">Show All {{ c.DEALER_TERM|title }}s</a>
       <a href="../dealer_admin/waitlist" class="btn btn-warning">Manage Waitlisted {{ c.DEALER_TERM|title }}s</a>
-      <a href="../dealer_admin/convert_declined" class="btn btn-danger">Convert Declined {{ c.DEALER_TERM|title }}'s Badges</a>
+      <button type="button" class="btn btn-danger" onClick="convertDeclinedConfirm()">Convert Declined {{ c.DEALER_TERM|title }}'s Badges</button>
     </span>
     <br/> <br/>
     {{ dealer_counts['approved'] }} approved tables / {{ dealer_counts['waitlisted'] }} waitlisted tables / {{ dealer_counts['unapproved'] }} unapproved tables
