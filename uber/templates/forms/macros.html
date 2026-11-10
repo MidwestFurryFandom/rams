@@ -119,7 +119,7 @@
   <div class="form-check{% if 'SwitchInput' in widget %} form-switch{% endif %}">
     {% if is_readonly %}
     <input type="hidden" name="{{ field.id }}" value="{{ field.data }}" />
-    {{ field(checked=custom_kwargs.pop('checked') if 'checked' in custom_kwargs else field.data, disabled=true, value=1, **custom_kwargs) }}
+    {{ field(checked=custom_kwargs.pop('checked') if 'checked' in custom_kwargs else field.data, disabled=custom_kwargs.pop('disabled') if 'disabled' in custom_kwargs else true, value=1, **custom_kwargs) }}
     {% else %}
     {{ field(checked=custom_kwargs.pop('checked') if 'checked' in custom_kwargs else field.data, value=1, **custom_kwargs) }}
     {% endif %}
