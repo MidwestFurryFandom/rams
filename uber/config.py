@@ -462,7 +462,11 @@ class Config(_Overridable):
     @dynamic
     def current_admin_access(self):
         # Avoids excessive round-trips to the DB by caching what site sections and pages the logged-in admin can access
-        site_section_access = {}
+        site_section_access = {
+            'full': [],
+            'read_write': [],
+            'write': [],
+        }
         from uber.models import Session
         with Session() as session:
             id = cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None))
