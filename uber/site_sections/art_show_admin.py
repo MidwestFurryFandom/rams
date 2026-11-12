@@ -160,7 +160,12 @@ class Root:
             'depts_by_sender': EmailService.emails_from_depts(session),
         }
 
-    def ops(self, session, message=''):
+    def attendee_ops(self, session, message=''):
+        return {
+            'message': message,
+        }
+
+    def artist_ops(self, session, message=''):
         return {
             'message': message,
         }

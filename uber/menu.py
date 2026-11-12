@@ -212,6 +212,7 @@ if c.ART_SHOW_ENABLED:
     c.MENU.append_menu_item(MenuItem(name='Art Show', submenu=[
         MenuItem(name='Applications', href='../art_show_admin/'),
         MenuItem(name='Link to Apply', href='../art_show_applications/', access_override='art_show_admin'),
-        MenuItem(name='At-Con Operations', href='../art_show_admin/ops'),
+        MenuItem(name='Artist Ops', href='../art_show_admin/artist_ops'),
+        MenuItem(name='Attendee Ops', href='../art_show_admin/attendee_ops'),
         MenuItem(name='Reports', href='../art_show_reports/index'),
         ]))

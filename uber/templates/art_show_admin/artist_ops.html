@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% set admin_area=True %}
-{% block title %}Art Show Admin{% endblock %}
+{% block title %}Art Show Admin Artist Ops{% endblock %}
 {% block content %}
 
 <nav aria-label="breadcrumb">
@@ -12,16 +12,13 @@
 
 <div class="card">
   <div class="card-header">
-    <h3 class="card-title">Art Show At-Con Ops</h3>
+    <h3 class="card-title">Art Show At-Con Artist Ops</h3>
   </div>
   <div class="card-body">
-    <a class="btn btn-outline-secondary" href="index">View {{ c.ART_SHOW_APP_TERM|title }}s</a>
+    <a class="btn btn-primary" href="index">View {{ c.ART_SHOW_APP_TERM|title }}s</a>
+    <a class="btn btn-secondary" href="assign_locations">Assign Artist Locations</a>
     <a class="btn btn-success" href="artist_check_in_out">Check In Artists</a>
-    <a class="btn btn-info" href="bidder_signup">Add Bidders</a>
-    <a class="btn btn-outline-secondary" href="assign_locations">Assign Artist Locations</a>
     <a class="btn btn-warning" href="artist_check_in_out?checkout=True">Check Out Artists</a>
-    <a class="btn btn-primary" href="sales_search">Make Sale</a>
-    <a class="btn btn-danger" href="close_out">Close Out / Piece Status</a>
   </div>
 </div>
     {% endblock %}
