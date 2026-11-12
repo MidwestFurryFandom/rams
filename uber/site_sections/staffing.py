@@ -40,7 +40,7 @@ def _require_dept_assignment(attendee):
         raise HTTPRedirect('{}?message={}', redirect, _dept_assignment_message())
 
 
-@all_renderable(public=True)
+@all_renderable()
 class Root:
     @requires_account(Attendee)
     def index(self, session, id, message=''):
