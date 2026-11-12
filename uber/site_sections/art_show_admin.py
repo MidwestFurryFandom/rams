@@ -304,15 +304,16 @@ class Root:
     def artist_check_in_out(self, session, checkout=False, hanging=False, mailin=False,
                             message='', page=1, search_text='', order='first_name'):
         filters = [ArtShowApplication.status == c.APPROVED]
-        if checkout:
-            filters.append(ArtShowApplication.checked_in != None)  # noqa: E711
-        else:
-            filters.append(ArtShowApplication.checked_out == None)  # noqa: E711
 
         if hanging:
             filters.append(ArtShowApplication.art_show_pieces.any(ArtShowPiece.status == c.HANGING))
-        if mailin:
+        elif mailin:
             filters.append(ArtShowApplication.delivery_method == c.BY_MAIL)
+        else:
+            if checkout:
+                filters.append(ArtShowApplication.checked_in != None)  # noqa: E711
+            else:
+                filters.append(ArtShowApplication.checked_out == None)  # noqa: E711
 
         search_text = search_text.strip()
         search_filters = []
