@@ -10,6 +10,7 @@ import bleach
 import html
 import inspect
 import json
+import logging
 import math
 import os
 import re
@@ -30,6 +31,9 @@ from uber.config import c
 from uber.decorators import render
 from uber.jinja import JinjaEnv
 from uber.utils import ensure_csrf_token_exists, hour_day_format, localized_now, normalize_newlines, listify, readable_join
+
+log = logging.getLogger(__name__)
+
 
 # This used to be available as markupsafe.text_type, but that was removed in version 1.1.0
 text_type = str
@@ -400,7 +404,7 @@ def form_link(model, new_window=False, prepend=''):
     page = 'form'
 
     if c.HAS_REGISTRATION_ACCESS:
-        attendee_section = 'registration/'
+        attendee_section = 'registration'
     else:
         attendee_section = ''
         page = '#attendee_form' if isinstance(model, Attendee) else page
