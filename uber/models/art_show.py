@@ -569,6 +569,11 @@ class ArtShowPiece(MagModel, table=True):
             ln=1, align="C"
         )
 
+        # Event Year
+        pdf.set_font(normal_font_name, size=6)
+        pdf.set_xy(210 + xplus, 337 + yplus)
+        pdf.cell(80, 16, txt=c.EVENT_YEAR, ln=1, align="L")
+
         # Type, Minimum Bid, QuickSale Price
         pdf.set_font(normal_font_name, size=10)
         pdf.set_xy(242 + xplus, 54 + yplus)

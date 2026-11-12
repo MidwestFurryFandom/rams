@@ -907,18 +907,34 @@ def ajax_or_redirect(func, redirect_url, message, save_location=False):
 def restricted(func):
     @wraps(func)
     def with_restrictions(*args, **kwargs):
+        from uber.models import AttendeeAccount
+
         if func.public:
             return func(*args, **kwargs)
 
         admin_account_id = cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None))
         attendee_account_id = cherrypy.session.get('attendee_account_id', getattr(cherrypy.request, 'attendee_account', None))
-        if not admin_account_id and not attendee_account_id:
+        if not admin_account_id and not attendee_account_id and ('/staffing/' not in c.PAGE_PATH or c.ATTENDEE_ACCOUNTS_ENABLED):
             ajax_or_redirect(func, '../accounts/login?message=', "You are not logged in.", True)
 
-        if '/staffing/' in c.PAGE_PATH and not c.CHECKLIST_OR_SIGNUPS_OPEN and not c.DEV_BOX:
-            message = "The volunteer checklist is not open yet." if c.VOLUNTEER_CHECKLIST_OPEN else "Shift signups are not available yet."
-            redirect = '../preregistration/homepage' if c.ATTENDEE_ACCOUNTS_ENABLED else '../landing/index'
-            ajax_or_redirect(func, f'{redirect}?message=', message, True)
+        if '/staffing/' in c.PAGE_PATH:
+            message = ''
+            if not c.CHECKLIST_OR_SIGNUPS_OPEN and not c.DEV_BOX:
+                message = "The volunteer checklist is not open yet." if c.VOLUNTEER_CHECKLIST_OPEN else "Shift signups are not available yet."
+            elif 'id' not in kwargs:
+                if c.ATTENDEE_ACCOUNTS_ENABLED and attendee_account_id:
+                    with uber.models.Session() as session:
+                        attendee_account = session.get(AttendeeAccount, attendee_account_id)
+                        if len(attendee_account.volunteering_attendees) == 1:
+                            kwargs['id'] = attendee_account.volunteering_attendees[0].id
+                if 'id' not in kwargs:
+                    action = 'complete the volunteer checklist' if c.VOLUNTEER_CHECKLIST_OPEN else 'sign up for shifts'
+                    message = f"Please select a badge below to {action}." if c.ATTENDEE_ACCOUNTS_ENABLED else \
+                              f"Please use your badge confirmation link to {action}."
+
+            if message:
+                redirect = '../preregistration/homepage' if c.ATTENDEE_ACCOUNTS_ENABLED else '../landing/index'
+                ajax_or_redirect(func, f'{redirect}?message=', message, True)
         elif admin_account_id is None:
             if getattr(func, 'kiosk_login', None):
                 if not cherrypy.session.get('kiosk_supervisor_id'):

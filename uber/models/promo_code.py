@@ -307,7 +307,7 @@ class PromoCode(MagModel, table=True):
     discount: int | None = Field(nullable=True, default=None)
     discount_type: int = Field(sa_column=Column(Choice(c.DISCOUNT_TYPE_OPTS)), default=c.FIXED_DISCOUNT)
     discount_on: str = Field(sa_type=MultiChoice(c.DISCOUNT_ON_OPTS), default=c.BASE_BADGE)
-    department: int = Field(sa_column=Column(Choice(c.RECEIPT_ITEM_DEPT_OPTS)), default=c.REG_RECEIPT_ITEM)
+    department: int = Field(sa_column=Column(Choice(c.DISCOUNT_DEPT_OPTS)), default=c.REG_RECEIPT_ITEM)
     expiration_date: datetime = Field(sa_type=DateTime(timezone=True), default=c.ESCHATON)
     uses_allowed: int | None = Field(nullable=True, default=None)
     cost: int | None = Field(nullable=True, default=None)

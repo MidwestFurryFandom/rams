@@ -606,7 +606,7 @@ class Root:
             if c.SHIFT_WEIGHTING_ENABLED:
                 row.append(job.weight)
             row.extend([job.required_roles_labels, "All" if job.all_roles_required else "Any"])
-            out.writerow()
+            out.writerow(row)
 
     @site_mappable
     @csv_file

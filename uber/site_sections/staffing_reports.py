@@ -164,6 +164,37 @@ class Root:
                 out.writerow([a.full_name, a.email, a.cellphone, label])
 
     @csv_file
+    def assigned_non_staff_volunteers(self, out, session):
+        """List volunteers without a Staff badge who hold at least one department assignment."""
+        out.writerow(['First Name', 'Last Name', 'Email', 'Badge Type', 'Placeholder', 'Assigned Depts'])
+        volunteers = session.staffers().filter(
+            Attendee.badge_type != c.STAFF_BADGE,
+            Attendee.dept_memberships.any()
+        ).options(selectinload(Attendee.assigned_depts))
+        for a in volunteers:
+            out.writerow([a.first_name, a.last_name, a.email, a.badge_type_label,
+                          'Yes' if a.placeholder else 'No', ', '.join(a.assigned_depts_labels)])
+
+    @csv_file
+    def unassigned_volunteers_with_shifts(self, out, session):
+        """List shifts held by volunteers who have no department assignment.
+
+        At events where awaiting_dept_assignment applies, these volunteers can no longer open the shifts page.
+        Signed Up is when the shift row was created, which is the assignment time for shifts an admin added.
+        """
+        out.writerow(['First Name', 'Last Name', 'Email', 'Department', 'Job', 'Start', 'Signed Up'])
+        volunteers = session.staffers().filter(
+            ~Attendee.dept_memberships.any(),
+            Attendee.shifts.any()
+        )
+        for a in volunteers:
+            for shift in sorted(a.shifts, key=lambda s: s.job.start_time):
+                job = shift.job
+                out.writerow([a.first_name, a.last_name, a.email, job.department_name, job.name,
+                              job.start_time_local.strftime('%Y-%m-%d %H:%M'),
+                              shift.created.astimezone(c.EVENT_TIMEZONE).strftime('%Y-%m-%d %H:%M')])
+
+    @csv_file
     def volunteers_with_worked_hours(self, out, session):
         weighted_or_not = 'Weighted ' if c.SHIFT_WEIGHTING_ENABLED else ''
         out.writerow(['Badge #', 'Full Name', 'Email Address', f'{weighted_or_not}Hours Scheduled', f'{weighted_or_not}Hours Worked'])

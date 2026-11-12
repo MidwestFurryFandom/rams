@@ -64,27 +64,6 @@ class Root:
 
         signnow_last_emailed = None
         signnow_signed = False
-        if c.SIGNNOW_MARKETPLACE_TEMPLATE_ID and (app.status == c.ACCEPTED or int(params.get('status', 0)) == c.ACCEPTED):
-            if cherrypy.request.method == 'POST':
-                signnow_request = SignNowRequest(session=session, model=app,
-                                                 ident="terms_and_conditions", create_if_none=True)
-            else:
-                signnow_request = SignNowRequest(session=session, model=app)
-
-            if not signnow_request.error_message and signnow_request.document:
-                session.add(signnow_request.document)
-
-                signnow_signed = signnow_request.document.signed
-                if not signnow_signed:
-                    signnow_signed = signnow_request.get_doc_signed_timestamp()
-                    if signnow_signed:
-                        signnow_signed = datetime.fromtimestamp(int(signnow_signed))
-                        signnow_request.document.signed = signnow_signed
-                        signnow_link = ''
-                        signnow_request.document.link = signnow_link
-
-                signnow_last_emailed = signnow_request.document.last_emailed
-                session.commit()
 
         if cherrypy.request.method == 'POST':
             if new_app:
@@ -102,12 +81,36 @@ class Root:
                     session.add(attendee)
                     app.attendee = attendee
 
+                if c.SIGNNOW_MARKETPLACE_TEMPLATE_ID and app.status == c.ACCEPTED:
+                    signnow_request = SignNowRequest(session=session, model=app,
+                                                     ident="terms_and_conditions", create_if_none=True)
+                    if not signnow_request.error_message and signnow_request.document:
+                        session.add(signnow_request.document)
+
                 if params.get('save_return_to_search', False):
                     return_to = 'index?'
                 else:
                     return_to = 'form?id=' + app.id + '&'
                 raise HTTPRedirect(
                     return_to + 'message={}', 'Application updated')
+
+        if c.SIGNNOW_MARKETPLACE_TEMPLATE_ID and app.status == c.ACCEPTED:
+            signnow_request = SignNowRequest(session=session, model=app)
+
+            if not signnow_request.error_message and signnow_request.document:
+                session.add(signnow_request.document)
+
+                signnow_signed = signnow_request.document.signed
+                if not signnow_signed:
+                    signnow_signed = signnow_request.get_doc_signed_timestamp()
+                    if signnow_signed:
+                        signnow_signed = datetime.fromtimestamp(int(signnow_signed))
+                        signnow_request.document.signed = signnow_signed
+                        signnow_link = ''
+                        signnow_request.document.link = signnow_link
+
+                signnow_last_emailed = signnow_request.document.last_emailed
+                session.commit()
         return {
             'message': message,
             'app': app,

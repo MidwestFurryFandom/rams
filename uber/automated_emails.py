@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import pathlib
 
 from pytz import UTC
-from sqlalchemy.orm import defaultload, joinedload, subqueryload
+from sqlalchemy.orm import joinedload, subqueryload
 
 from uber.config import c
 from uber import decorators
@@ -14,7 +14,6 @@ from uber.models import (AdminAccount, Attendee, AttendeeAccount, ArtShowApplica
                          Email, Group, GuestGroup, IndieGame, IndieJudge, IndieStudio, ArtistMarketplaceApplication, MITSTeam,
                          MITSApplicant, ReceiptInfo, PanelApplication, PanelApplicant, PromoCode, PromoCodeGroup, LotteryApplication,
                          RoomAssignment, Shift)
-from uber.models.hotel import HotelRoomInventory, LotteryHotel
 from uber.utils import after, before, days_after, days_before, days_between, localized_now, DeptChecklistConf
 
 log = logging.getLogger(__name__)
@@ -55,10 +54,6 @@ class AutomatedEmailFixture:
         MITSApplicant: [subqueryload(MITSApplicant.attendee), subqueryload(MITSApplicant.team)],
         PanelApplication: [subqueryload(PanelApplication.applicants).subqueryload(PanelApplicant.attendee)],
         GuestGroup: [joinedload(GuestGroup.group)],
-        # Each room joins its hotel, so an 800 KB floor map repeated on 1,420 room
-        # rows took a query over all rooms to 1.1 GB. No room email reads the map.
-        RoomAssignment: [defaultload(RoomAssignment.inventory).defaultload(HotelRoomInventory.hotel)
-                         .defer(LotteryHotel.map_yaml).defer(LotteryHotel.map_svg)],
     }
 
     def __init__(
@@ -889,7 +884,7 @@ if c.VOLUNTEER_CHECKLIST_OPEN:
     StopsEmailFixture(
         f'Please complete your {c.EVENT_NAME} Staff/Volunteer Checklist',
         'shifts/created.txt',
-        "lambda a: a.staffing",
+        "lambda a: a.staffing and not a.awaiting_dept_assignment",
         'volunteer_checklist_completion_request',
         when=[after(c.VOLUNTEER_CHECKLIST_OPEN)],
         allow_at_the_con=True)
@@ -898,7 +893,7 @@ if c.VOLUNTEER_CHECKLIST_OPEN:
         f'Still want to volunteer at {c.EVENT_NAME} ({c.EVENT_DATE})?',
         'shifts/volunteer_check.txt',
         "lambda a: c.CHECKLIST_OR_SIGNUPS_OPEN and a.badge_type != c.CONTRACTOR_BADGE and c.VOLUNTEER_RIBBON in a.ribbon_ints \
-            and a.takes_shifts and a.weighted_hours == 0",
+            and a.takes_shifts and a.weighted_hours == 0 and not a.awaiting_dept_assignment",
         'volunteer_still_interested_inquiry',
         when=[days_before(28, c.FINAL_EMAIL_DEADLINE)])
 
@@ -906,7 +901,8 @@ if c.VOLUNTEER_AGREEMENT_ENABLED:
     StopsEmailFixture(
         f'Reminder: Please agree to terms of {c.EVENT_NAME} ({c.EVENT_DATE}) volunteer agreement',
         'staffing/volunteer_agreement.txt',
-        "lambda a: c.VOLUNTEER_CHECKLIST_OPEN and c.VOLUNTEER_AGREEMENT_ENABLED and not a.agreed_to_volunteer_agreement",
+        "lambda a: c.VOLUNTEER_CHECKLIST_OPEN and c.VOLUNTEER_AGREEMENT_ENABLED and not a.agreed_to_volunteer_agreement \
+            and not a.awaiting_dept_assignment",
         'volunteer_agreement',
         when=[days_before(45, c.FINAL_EMAIL_DEADLINE)])
 
@@ -915,7 +911,7 @@ if c.SHIFTS_CREATED:
         f'{c.EVENT_NAME} ({c.EVENT_DATE}) shifts are live!',
         'shifts/shifts_created.txt',
         "lambda a: a.shift_signups_available and a.badge_type != c.CONTRACTOR_BADGE and \
-            a.takes_shifts and a.registered_local <= a.shift_signups_start",
+            a.takes_shifts and a.registered_local <= a.shift_signups_start and not a.awaiting_dept_assignment",
         'volunteer_shift_signup_notification',
         when=[before(c.PREREG_TAKEDOWN)])
 
@@ -923,7 +919,8 @@ if c.SHIFTS_CREATED:
         f'Reminder to sign up for {c.EVENT_NAME} ({c.EVENT_DATE}) shifts',
         'shifts/reminder.txt',
         "lambda a: a.shift_signups_available and a.badge_type != c.CONTRACTOR_BADGE and \
-            days_after(14, max(a.registered_local, a.shift_signups_start))() and a.takes_shifts and not a.shift_minutes",
+            days_after(14, max(a.registered_local, a.shift_signups_start))() and a.takes_shifts and not a.shift_minutes \
+            and not a.awaiting_dept_assignment",
         'volunteer_shift_signup_reminder',
         when=[before(c.PREREG_TAKEDOWN)])
 
@@ -931,7 +928,8 @@ if c.SHIFTS_CREATED:
         f'Last chance to sign up for {c.EVENT_NAME} ({c.EVENT_DATE}) shifts',
         'shifts/reminder.txt',
         "lambda a: a.shift_signups_available and a.badge_type != c.CONTRACTOR_BADGE and \
-            (not c.PREREG_TAKEDOWN or c.BEFORE_PREREG_TAKEDOWN) and a.takes_shifts and not a.shift_minutes",
+            (not c.PREREG_TAKEDOWN or c.BEFORE_PREREG_TAKEDOWN) and a.takes_shifts and not a.shift_minutes \
+            and not a.awaiting_dept_assignment",
         'volunteer_shift_signup_reminder_last_chance',
         when=[days_before(10, c.EPOCH)])
 
@@ -950,6 +948,12 @@ if c.SHIFTS_CREATED:
         'volunteer_shifts_worked',
         when=[days_after(1, c.ESCHATON)],
         allow_post_con=True)
+
+    StopsEmailFixture(
+        f'Shifts needed to keep your {c.EVENT_NAME} staff crash space',
+        'staffing/shift_compliance_nag.html',
+        "lambda a: c.AFTER_SHIFTS_CREATED and not a.is_shift_compliant",
+        'staff_crash_space_shift_requirements')
 
 
 # For events with customized badges, these emails remind people to let us know what we want on their badges.  We have
