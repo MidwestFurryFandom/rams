@@ -15,7 +15,7 @@
 
       {% if c.ATTENDEE_ACCOUNTS_ENABLED %}
       <div class="alert alert-info">
-        Filling out the information below will add this badge to your {% if c.OIDC_ACCOUNT_NAME %}{{ c.OIDC_ACCOUNT_NAME }} account{% else %}account, <strong>{{ logged_in_account.email }}</strong>{% endif %}.
+        Filling out the information below will add this badge to your {% if c.OIDC_ENABLED %}{{ c.OIDC_ACCOUNT_NAME }} account{% else %}account, <strong>{{ logged_in_account.email }}</strong>{% endif %}.
         <br/><br/><strong>If you do NOT want to manage this badge under your account</strong>, please copy the link below and send it to
         the badge owner to fill out:
         <br/><code style="user-select: all;">{{ c.URL_BASE }}/preregistration/register_group_member?group_id={{ group.id }}&id={{ attendee.id }}</code>
