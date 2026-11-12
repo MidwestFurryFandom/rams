@@ -422,8 +422,8 @@ def form_link(model, new_window=False, prepend=''):
     site_section = site_sections.get(cls, form_link_site_sections.get(cls))
     name = getattr(model, 'name', getattr(model, 'full_name', getattr(model, 'email', getattr(model, 'confirmation_num', model))))
 
-    if not getattr(c, f'HAS_{site_section.upper()}_ACCESS'):
-            return name
+    if site_section and not getattr(c, f'HAS_{site_section.upper()}_ACCESS'):
+        return name
 
     extra_html = ' target="_blank"' if new_window and page != '#attendee_form' else ''
     if site_section:

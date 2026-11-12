@@ -46,6 +46,7 @@
   {%- endif -%}
 </h2>
 
+<div class="card card-body">
 <form method="post" action="role" class="form-horizontal" role="form">
   {{ csrf_token() }}
   <input type="hidden" name="department_id" value="{{ department.id }}" />
@@ -99,4 +100,5 @@
     </div>
   </div>
 </form>
+</div>
 {% endblock %}
