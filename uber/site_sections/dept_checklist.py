@@ -307,7 +307,7 @@ class Root:
                 forms = request_forms[request.id]
 
             for form in forms.values():
-                form.populate_obj(request)
+                form.populate_obj(request, is_admin=True)
             session.add(request)
 
             hash = "#new-request" if params.get('additional_request', None) else ''

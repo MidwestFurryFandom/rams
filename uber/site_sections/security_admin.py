@@ -46,7 +46,7 @@ class Root:
 
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(entry)
+                form.populate_obj(entry, is_admin=True)
 
             changed_attendees = 0
             entry_pii_updated = entry.is_new or any(

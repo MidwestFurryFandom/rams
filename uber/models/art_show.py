@@ -283,7 +283,7 @@ class ArtShowApplication(MagModel, table=True):
             return
 
         value = int(value)
-        if value not in c.BADGE_STATUS_OPTS:
+        if value not in c.BADGE_STATUS:
             log.error(f"Tried to set invalid badge status on art show app {self.id}'s attendee: {value}")
             return
         if self.attendee:
@@ -542,49 +542,48 @@ class ArtShowPiece(MagModel, table=True):
         pdf.image(get_static_file_path('bidsheet.png'), x=0 + xplus, y=0 + yplus, w=306)
         pdf.set_font(normal_font_name, size=10)
         pdf.set_xy(81 + xplus, 27 + yplus)
-        pdf.cell(80, 16, txt=self.app.locations, ln=1, align="C")
+        pdf.cell(80, 16, text=self.app.locations, align="C")
         pdf.set_font("3of9", size=22)
         pdf.set_xy(163 + xplus, 15 + yplus)
-        pdf.cell(132, 22, txt=self.barcode_data, ln=1, align="C")
+        pdf.cell(132, 22, text=self.barcode_data, align="C")
         pdf.set_font(bold_font_name, size=8,)
         pdf.set_xy(163 + xplus, 32 + yplus)
-        pdf.cell(132, 12, txt=self.artist_and_piece_id, ln=1, align="C")
+        pdf.cell(132, 12, text=self.artist_and_piece_id, align="C")
 
         # Artist, Title, Media
         pdf.set_font(normal_font_name, size=12)
         set_fitted_font_size(self.app_display_name)
         pdf.set_xy(81 + xplus, 54 + yplus)
         pdf.cell(160, 24,
-                    txt=(self.app_display_name),
-                    ln=1, align="C")
+                    text=(self.app_display_name),
+                    align="C")
         pdf.set_xy(81 + xplus, 80 + yplus)
         set_fitted_font_size(self.name)
-        pdf.cell(160, 24, txt=self.name, ln=1, align="C")
+        pdf.cell(160, 24, text=self.name, align="C")
         pdf.set_font(normal_font_name, size=12)
         pdf.set_xy(81 + xplus, 105 + yplus)
         pdf.cell(
             160, 24,
-            txt=self.media +
+            text=self.media +
                 (' ({} of {})'.format(self.print_run_num, self.print_run_total) if self.type == c.PRINT else ''),
-            ln=1, align="C"
+            align="C"
         )
-
-        # Event Year
-        pdf.set_font(normal_font_name, size=6)
-        pdf.set_xy(210 + xplus, 337 + yplus)
-        pdf.cell(80, 16, txt=c.EVENT_YEAR, ln=1, align="L")
 
         # Type, Minimum Bid, QuickSale Price
         pdf.set_font(normal_font_name, size=10)
         pdf.set_xy(242 + xplus, 54 + yplus)
-        pdf.cell(53, 24, txt=self.type_label, ln=1, align="C")
+        pdf.cell(53, 24, text=self.type_label, align="C")
         pdf.set_font(normal_font_name, size=8)
         pdf.set_xy(242 + xplus, 90 + yplus)
         # Note: we want the prices on the PDF to always have a trailing .00
-        pdf.cell(53, 14, txt=('${:,.2f}'.format(self.opening_bid)) if self.valid_for_sale else 'NFS', ln=1)
+        pdf.cell(53, 14, text=('${:,.2f}'.format(self.opening_bid)) if self.valid_for_sale else 'NFS')
         pdf.set_xy(242 + xplus, 116 + yplus)
         pdf.cell(
-            53, 14, txt=('${:,.2f}'.format(self.quick_sale_price)) if self.valid_quick_sale else 'NFS', ln=1)
+            53, 14, text=('${:,.2f}'.format(self.quick_sale_price)) if self.valid_quick_sale else 'NFS')
+
+        # Event Year
+        pdf.set_font(normal_font_name, size=6)
+        pdf.text(212 + xplus, 347 + yplus, c.EVENT_YEAR)
 
 
 class ArtShowPanel(MagModel, table=True):

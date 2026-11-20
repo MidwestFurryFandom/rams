@@ -73,7 +73,7 @@ class Root:
             else:
                 attendee = app.attendee
             for form in forms.values():
-                form.populate_obj(app)
+                form.populate_obj(app, is_admin=True)
 
             message = message or check(app)
             if not message:

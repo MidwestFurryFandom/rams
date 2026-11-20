@@ -49,7 +49,7 @@ class Root:
             message = check_dept_admin(session)
             if not message:
                 for form in forms.values():
-                    form.populate_obj(department)
+                    form.populate_obj(department, is_admin=True)
                 session.add(department)
 
                 raise HTTPRedirect(
@@ -105,7 +105,7 @@ class Root:
             message = check_dept_admin(session)
             if not message:
                 for form in forms.values():
-                    form.populate_obj(department)
+                    form.populate_obj(department, is_admin=True)
                 session.add(department)
 
                 attendee = session.admin_attendee()

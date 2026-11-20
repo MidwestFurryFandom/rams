@@ -343,7 +343,7 @@ class Root:
 
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(job)
+                form.populate_obj(job, is_admin=True)
             job.department = department
             session.add(job)
 
@@ -410,7 +410,7 @@ class Root:
 
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(job_template)
+                form.populate_obj(job_template, is_admin=True)
             job_template.department_id = department.id
             session.add(job_template)
 

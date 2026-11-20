@@ -198,7 +198,7 @@ class Root:
 
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(email)
+                form.populate_obj(email, is_admin=True)
             session.add(email)
             session.commit()
             EmailService.reconcile_policy(session, email)

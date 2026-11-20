@@ -103,7 +103,7 @@ class Root:
         forms = load_forms(params, app, ['PanelInfo', 'PanelOtherInfo'])
 
         for form in forms.values():
-            form.populate_obj(app)
+            form.populate_obj(app, is_admin=True)
             session.add(app)
 
         raise HTTPRedirect('app?id={}&message={}', app.id, 'Application updated.')
@@ -145,7 +145,7 @@ class Root:
         forms = load_forms(params, panelist, form_list, field_prefix=prefix)
 
         for form in forms.values():
-            form.populate_obj(panelist)
+            form.populate_obj(panelist, is_admin=True)
             session.add(panelist)
 
         raise HTTPRedirect('app?id={}&message={} was successfully {}.',

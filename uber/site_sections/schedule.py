@@ -154,7 +154,7 @@ class Root:
 
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(location)
+                form.populate_obj(location, is_admin=True)
 
             location.update_events(session)
 
@@ -232,7 +232,7 @@ class Root:
 
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(event)
+                form.populate_obj(event, is_admin=True)
             session.add(event)
 
             # Associate a panel app with this event, and if the event is new, use the panel app's name and title
