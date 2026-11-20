@@ -283,7 +283,7 @@ class ArtShowApplication(MagModel, table=True):
             return
 
         value = int(value)
-        if value not in c.BADGE_STATUS_OPTS:
+        if value not in c.BADGE_STATUS:
             log.error(f"Tried to set invalid badge status on art show app {self.id}'s attendee: {value}")
             return
         if self.attendee:

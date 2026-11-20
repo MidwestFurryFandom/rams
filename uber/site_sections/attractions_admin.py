@@ -225,7 +225,7 @@ class Root:
 
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(attraction)
+                form.populate_obj(attraction, is_admin=True)
 
             if 'signups_open_type' in params:
                 attraction.update_signup_times(params['signups_open_type'])
@@ -304,7 +304,7 @@ class Root:
 
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(attraction)
+                form.populate_obj(attraction, is_admin=True)
 
             if 'signups_open_type' in params:
                 attraction.update_signup_times(params['signups_open_type'])
@@ -360,7 +360,7 @@ class Root:
 
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(feature)
+                form.populate_obj(feature, is_admin=True)
 
             if 'signups_open_type' in params:
                 feature.update_signup_times(params['signups_open_type'])
@@ -473,7 +473,7 @@ class Root:
         if cherrypy.request.method == 'POST':
             is_new = event.is_new
             for form in forms.values():
-                form.populate_obj(event)
+                form.populate_obj(event, is_admin=True)
             
             if 'signups_open_type' in params:
                 event.update_signup_times(params['signups_open_type'])

@@ -83,7 +83,7 @@ class Root:
                         session.add(attendee)
                         app.attendee = attendee
                 for form in forms.values():
-                    form.populate_obj(app)
+                    form.populate_obj(app, is_admin=True)
 
                 session.add(app)
                 if params.get('save_return_to_search', False):
@@ -453,7 +453,7 @@ class Root:
         forms = load_forms(params, app, form_list, field_prefix=app.id)
 
         for form in forms.values():
-            form.populate_obj(app)
+            form.populate_obj(app, is_admin=True)
 
         if params.get('check_in', ''):
             app.checked_in = localized_now()
@@ -481,7 +481,7 @@ class Root:
         if 'check_in' in params:
             attendee_forms = load_forms(params, attendee, ['AdminArtistAttendeeInfo'], field_prefix=app.id)
             for form in attendee_forms.values():
-                form.populate_obj(attendee)
+                form.populate_obj(attendee, is_admin=True)
 
             if c.COLLECT_FULL_ADDRESS and attendee.country == 'United States':
                 attendee.international = False
@@ -492,7 +492,7 @@ class Root:
         for piece in app.art_show_pieces:
             piece_forms = load_forms(params, piece, ['PieceCheckInOut'], field_prefix=piece.id)
             for form in piece_forms.values():
-                form.populate_obj(piece)
+                form.populate_obj(piece, is_admin=True)
 
             if params.get('hanging', None) and piece.status == c.EXPECTED:
                 piece.status = c.HANGING
@@ -979,9 +979,9 @@ class Root:
         attendee_forms = load_forms(params, attendee, ['BidderAttendeeInfo'], field_prefix=attendee.id)
 
         for form in forms.values():
-            form.populate_obj(bidder)
+            form.populate_obj(bidder, is_admin=True)
         for attendee_form in attendee_forms.values():
-            attendee_form.populate_obj(attendee)
+            attendee_form.populate_obj(attendee, is_admin=True)
 
         if params.get('complete', None):
             bidder.signed_up = localized_now()

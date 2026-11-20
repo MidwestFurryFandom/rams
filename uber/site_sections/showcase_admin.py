@@ -63,7 +63,7 @@ class Root:
 
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(studio)
+                form.populate_obj(studio, is_admin=True)
             message = f"{studio.name} updated."
             if params.get('showcase_type'):
                 raise HTTPRedirect('index?showcase_type={}&message={}',
@@ -146,7 +146,7 @@ class Root:
         if cherrypy.request.method == 'POST':
             for form in forms.values():
                 if not isinstance(form, NewJudgeInfo):
-                    form.populate_obj(judge)
+                    form.populate_obj(judge, is_admin=True)
 
             # only match on last name and email, to prevent nickname issues; this could cause
             # problems if we had two judges with the same last name AND the same email address
@@ -199,7 +199,7 @@ class Root:
 
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(judge)
+                form.populate_obj(judge, is_admin=True)
             if params.get('save_return_to_search', False):
                 raise HTTPRedirect('index?message={}&showcase_type={}#{}',
                                 f"Successfully updated info for {judge.full_name}.", showcase_type, 'judges')
@@ -299,7 +299,7 @@ class Root:
         
         if cherrypy.request.method == 'POST':
             for form in forms.values():
-                form.populate_obj(game)
+                form.populate_obj(game, is_admin=True)
             if params.get('save_return_to_search', False):
                 raise HTTPRedirect('index?message={}&showcase_type={}#{}',
                                 f"Successfully updated info for {game.title}.", game.showcase_type, 'games')
