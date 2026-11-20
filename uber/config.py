@@ -1848,6 +1848,9 @@ class AWSSecretFetcher:
                 # We can't find the resource that you asked for.
                 log.error("Retrieving secret error: Resource not found ({}).".format(str(e)))
                 return
+            log.error(f"Unknown client error: {e}")
+        except Exception as e:
+            log.error(f"Error fetching secret: {e}")
         else:
             # Decrypts secret using the associated KMS key.
             if 'SecretString' in get_secret_value_response:
