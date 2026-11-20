@@ -812,9 +812,9 @@ class Root:
             pieces = app.art_show_pieces
 
         pdf = fpdf.FPDF(unit='pt', format='letter')
-        pdf.add_font('3of9', '', get_static_file_path('free3of9.ttf'), uni=True)
-        pdf.add_font('NotoSans', '', get_static_file_path('NotoSans-Regular.ttf'), uni=True)
-        pdf.add_font('NotoSans Bold', '', get_static_file_path('NotoSans-Bold.ttf'), uni=True)
+        pdf.add_font('3of9', '', get_static_file_path('free3of9.ttf'))
+        pdf.add_font('NotoSans', '', get_static_file_path('NotoSans-Regular.ttf'))
+        pdf.add_font('NotoSans Bold', '', get_static_file_path('NotoSans-Bold.ttf'))
         normal_font_name = 'NotoSans'
         bold_font_name = 'NotoSans Bold'
 

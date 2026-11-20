@@ -9,7 +9,7 @@ checkdigit==0.5.0
 cherrypy==18.10.0
 configobj==5.0.9
 email_validator==2.2.0
-fpdf2==2.8.3
+fpdf2==2.9.0
 geopy==2.4.1
 ics==0.7.2
 TatSu==5.16
