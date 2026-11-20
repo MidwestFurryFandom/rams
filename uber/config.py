@@ -1795,22 +1795,26 @@ class AWSSecretFetcher:
     """
 
     def __init__(self):
+        self.client = None
         self.start_session()
 
     def start_session(self):
         import boto3
 
-        aws_session = boto3.session.Session(
-            aws_access_key_id=c.AWS_ACCESS_KEY,
-            aws_secret_access_key=c.AWS_SECRET_KEY
-        )
+        try:
+            aws_session = boto3.session.Session(
+                aws_access_key_id=c.AWS_ACCESS_KEY,
+                aws_secret_access_key=c.AWS_SECRET_KEY
+            )
+        except Exception as e:
+            log.error(f"Could not fetch AWS secrets: {e}")
+        else:
+            self.client = aws_session.client(
+                service_name=c.AWS_SECRET_SERVICE_NAME,
+                region_name=c.AWS_REGION
+            )
 
-        self.client = aws_session.client(
-            service_name=c.AWS_SECRET_SERVICE_NAME,
-            region_name=c.AWS_REGION
-        )
-
-        self.session_expiration = datetime.now() + timedelta(hours=6)
+            self.session_expiration = datetime.now() + timedelta(hours=6)
 
     def get_secret(self, secret_name):
         import json
@@ -1859,7 +1863,7 @@ class AWSSecretFetcher:
         self.get_signnow_secret()
 
     def get_signnow_secret(self):
-        if not c.AWS_SIGNNOW_SECRET_NAME:
+        if not c.AWS_SIGNNOW_SECRET_NAME or not self.client:
             return
 
         signnow_secret = self.get_secret(c.AWS_SIGNNOW_SECRET_NAME)
