@@ -271,6 +271,13 @@ class ArtShowApplication(MagModel, table=True):
     @property
     def email(self):
         return self.attendee.email if self.attendee else ''
+
+    @property
+    def is_international(self):
+        if self.attendee:
+            country = self.country or self.attendee.country
+            if country and country not in ['US', 'USA', 'United States']:
+                return True
     
     @property
     def badge_status(self):
