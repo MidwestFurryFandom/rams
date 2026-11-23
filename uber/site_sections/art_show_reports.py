@@ -165,6 +165,15 @@ class Root:
             'no_methods': no_methods if 'no_methods' in params else None,
         }
 
+    def artist_assigned_locations(self, session, message=''):
+        approved_artists = session.query(ArtShowApplication).filter(ArtShowApplication.status == c.APPROVED).options(
+            selectinload(ArtShowApplication.assignments))
+
+        return {
+            'message': message,
+            'apps': approved_artists,
+        }
+
     def summary(self, session, message=''):
         general_pieces = session.query(ArtShowPiece).join(ArtShowApplication).filter(
             ArtShowApplication.status == c.APPROVED, ArtShowPiece.gallery == c.GENERAL)
