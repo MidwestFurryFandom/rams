@@ -3,7 +3,7 @@ from uber.decorators import all_renderable, csv_file, log_pageview
 
 from collections import defaultdict
 from sqlalchemy import func, or_, and_
-from sqlalchemy.orm import joinedload, lazyload
+from sqlalchemy.orm import joinedload, lazyload, selectinload
 
 from uber.custom_tags import format_currency
 from uber.models import ArtShowApplication, ArtShowBidder, ArtShowPiece, ArtShowReceipt, Attendee, ModelReceipt
@@ -163,6 +163,15 @@ class Root:
             'qs_total': qs_total,
             'yes_methods': yes_methods if 'yes_methods' in params else None,
             'no_methods': no_methods if 'no_methods' in params else None,
+        }
+
+    def artist_assigned_locations(self, session, message=''):
+        approved_artists = session.query(ArtShowApplication).filter(ArtShowApplication.status == c.APPROVED).options(
+            selectinload(ArtShowApplication.assignments))
+
+        return {
+            'message': message,
+            'apps': approved_artists,
         }
 
     def summary(self, session, message=''):

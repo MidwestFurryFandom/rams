@@ -26,7 +26,11 @@ applyTemplate() {
         if (this.slots < template.min_slots) {
             this.slots = template.min_slots;
         }
-}
+},
+toggleNoSlots(data) {
+    let origSlots = {{ job_or_template.slots if job_or_template.slots is not none else 0|tojson }};
+    if(data.no_slots) { data.slots = 0; } else { data.slots = origSlots; }
+},
 {% endblock %}
 
 {% block name_desc %}
@@ -36,8 +40,8 @@ applyTemplate() {
 
 {% block weight_visibility %}
 <div class="col-sm">
-    {% call form_macros.input(job_or_template_info.slots, **{'x-model.number':'slots', ':disabled':'no_slots'}) %}
-    {{ form_macros.input(job_or_template_info.no_slots, alpine_model='no_slots') }}
+    {% call form_macros.input(job_or_template_info.slots, **{'x-model.number':'slots', ':readonly':'no_slots'}) %}
+    {{ form_macros.input(job_or_template_info.no_slots, alpine_model='no_slots', **{'x-on:change':'toggleNoSlots($data)'}) }}
     {% endcall %}
 </div>
 {{ super() }}

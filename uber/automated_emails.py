@@ -596,6 +596,13 @@ if c.ART_SHOW_ENABLED:
         'art_show_agent_reminder',
         when=[after(c.EVENT_TIMEZONE.localize(datetime(int(c.EVENT_YEAR), 11, 1)))])
 
+    ArtShowAppEmailFixture(
+        f'{c.EVENT_NAME} Art Show Payment Options',
+        'art_show/international_payout.html',
+        "lambda a: a.status == c.APPROVED and a.is_international",
+        'art_show_international_payout',
+    )
+
     if c.ART_SHOW_REG_START < (c.EPOCH - timedelta(days=7)):
         ArtShowAppEmailFixture(
             f'{c.EVENT_NAME} Art Show MAIL IN Instructions',

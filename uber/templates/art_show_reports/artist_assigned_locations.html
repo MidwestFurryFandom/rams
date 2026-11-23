@@ -1,0 +1,49 @@
+{% extends 'static_views/static_base.html' %}
+{% import 'art_show_common/print_macros.html' as print_macros with context %}
+
+{% set no_print = True %}
+{% include 'art_show_common/print.html' with context %}
+{% import 'macros.html' as macros with context %}
+
+{% block page %}
+{{ "deps/bootstrap5/datatables.min.css"|serve_static_content }}
+{{ "deps/combined.min.js"|serve_static_content }}
+{{ "deps/jquery/jquery-migrate-3.4.1.js"|serve_static_content }}
+{{ "js/common-static.js"|serve_static_content }}
+{{ "deps/bootstrap5/datatables.min.js"|serve_static_content }}
+<script type="text/javascript">
+    $().ready(function() {
+    var table = new DataTable($('#locations'), {
+                        stateSave: true,
+                        searching: false, paging: false, info: false,
+                    });
+                    table.columns().flatten().each( function ( colIdx ) {
+                        var header_name = $(table.column(colIdx).header()).text();
+                    } );
+    });
+</script>
+<h3 align="center">Artists Assigned Locations Report -- {{ now_localized()|datetime("%m/%d/%Y, %-I:%M%p") }}</h3>
+
+<div class="card-body p-0 m-0">
+    <table class="table table-bordered" id="locations" style="margin: 20px; width: calc(100% - 40px);">
+        <thead>
+            <tr>
+                <th>Artist Name</th>
+                <th>Banner Name</th>
+                <th>General Locations</th>
+                <th>Mature Locations</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for app in apps %}
+        <tr>
+            <td>{{ app.artist_or_full_name }}</td>
+            <td>{{ app.display_name }}{% if app.has_mature_space and app.banner_name_ad %} ({{ app.banner_name_ad }}){% endif %}</td>
+            <td>{% if app.has_general_space %}{{ app.get_printable_locations(c.GENERAL) or 'Not Assigned' }}{% else %}N/A{% endif %}</td>
+            <td>{% if app.has_mature_space %}{{ app.get_printable_locations(c.MATURE) or 'Not Assigned' }}{% else %}N/A{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
