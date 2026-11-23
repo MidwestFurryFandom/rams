@@ -16,7 +16,7 @@ Use these to add or rearrange fields. Remember to use {{ super() }} to print the
     function initBaseJobData() {
         return {
             {% if job or job_or_template.is_new %}
-                no_slots: !{{ 'true' if job_or_template.is_new else job_or_template_info.slots|boolean|tojson }},
+                no_slots: !{{ 'true' if job_or_template.is_new else job_or_template_info.slots.data|boolean|tojson }},
             {% endif %}
 
             name: {{ job_or_template_info.name.data|tojson }},
