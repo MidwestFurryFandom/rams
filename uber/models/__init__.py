@@ -1754,8 +1754,10 @@ class UberSession(sqlalchemy.orm.Session):
 
             """
             lower_bound, upper_bound = c.BADGE_RANGES[badge_type]
+            exclude_ids = [model.id for model in self.dirty if isinstance(model, BadgeInfo)]
 
             return self.query(BadgeInfo).options(lazyload(BadgeInfo.attendee)).filter(
+                ~BadgeInfo.id.in_(exclude_ids),
                 BadgeInfo.attendee_id == None,  # noqa: E711
                 BadgeInfo.ident >= lower_bound,
                 BadgeInfo.ident <= upper_bound).order_by(BadgeInfo.ident).limit(1).first()
