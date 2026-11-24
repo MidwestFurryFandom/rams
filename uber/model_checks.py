@@ -26,7 +26,7 @@ from uber.config import c
 from uber.custom_tags import format_currency, full_date_local
 from uber.decorators import prereg_validation, validation
 from uber.models import (AccessGroup, AdminAccount, ApiToken, Attendee, ArtShowApplication, ArtShowPiece,
-                         Attraction, AttractionFeature, ArtShowBidder, DeptRole, Event,
+                         Attraction, AttractionFeature, ArtShowBidder, BadgeWaitlistSignup, DeptRole, Event,
                          GuestDetailedTravelPlan, IndieDeveloper, IndieGame, IndieGameCode, IndieJudge, IndieStudio,
                          Job, ArtistMarketplaceApplication, MITSApplicant, MITSGame, MITSTeam,
                          PromoCode, PromoCodeGroup, Sale, Session, WatchList)
@@ -751,6 +751,43 @@ def bidder_num_dupe(bidder):
                         f"The bidder number {bidder_num_dupe.bidder_num[2:]} already belongs to bidder {bidder_num_dupe.bidder_num}.")
 
 
+@validation.BadgeWaitlistSignup
+def dupe_check(signup):
+    # An unparseable birthdate stays a string; the form rejects it, and comparing it in SQL raises DataError.
+    if isinstance(signup.birthdate, str):
+        return
+
+    # Check in the request's own session when there is one. A separate session takes a second
+    # pool connection per signup and cannot see signups this request has added but not committed.
+    if signup.session is None:
+        with Session() as session:
+            return _waitlist_dupe_error(session, signup)
+    return _waitlist_dupe_error(signup.session, signup)
+
+
+def _waitlist_dupe_error(session, signup):
+    # Names match ignoring case and surrounding spaces. A cancelled signup does not block signing up again;
+    # the new signup goes to the back of the line.
+    first_name = (signup.first_name or '').strip().lower()
+    last_name = (signup.last_name or '').strip().lower()
+
+    dupe_signup = session.query(BadgeWaitlistSignup).filter(
+        BadgeWaitlistSignup.id != signup.id,
+        BadgeWaitlistSignup.status != c.CANCELLED,
+        func.lower(func.trim(BadgeWaitlistSignup.first_name)) == first_name,
+        func.lower(func.trim(BadgeWaitlistSignup.last_name)) == last_name,
+        BadgeWaitlistSignup.birthdate == signup.birthdate).first()
+    if dupe_signup:
+        return ('', f'There is already a waitlist signup for {dupe_signup.full_name}.')
+
+    existing_attendee = session.attendees_with_badges().filter(
+        func.lower(func.trim(Attendee.first_name)) == first_name,
+        func.lower(func.trim(Attendee.last_name)) == last_name,
+        Attendee.birthdate == signup.birthdate).first()
+    if existing_attendee:
+        return ('', f'{existing_attendee.full_name} already has a valid badge.')
+
+
 # This is still required for creating an attendee from an art show app, will need to refactor later
 Attendee.required = [('first_name', 'First Name'),
                      ('last_name', 'Last Name'),
@@ -784,26 +821,30 @@ def no_more_child_badges(attendee):
 @prereg_validation.Attendee
 def child_badge_over_13(attendee):
     if not attendee.is_new and attendee.badge_status != c.PENDING_STATUS \
-            or attendee.unassigned_group_reg or attendee.valid_placeholder:
+            or attendee.unassigned_group_reg or attendee.valid_placeholder or not attendee.birthdate:
         return
 
-    if c.PSEUDO_UNDER_13_BADGE in c.PREREG_BADGE_TYPES and attendee.birthdate and attendee.badge_type == c.PSEUDO_UNDER_13_BADGE \
-            and get_age_from_birthday(attendee.birthdate, c.NOW_OR_AT_CON) >= 13:
+    age = get_age_from_birthday(attendee.birthdate, c.NOW_OR_AT_CON)
+
+    if c.PSEUDO_UNDER_13_BADGE in c.PREREG_BADGE_TYPES and attendee.badge_type == c.PSEUDO_UNDER_13_BADGE \
+            and age >= 13:
         return ('badge_type',
-                f"If you will be 13 or older at the start of {c.EVENT_NAME}, "
-                "please select an Attendee badge instead of a 12 and Under badge.")
+                f"Since you will be {age} years old by the start of {c.EVENT_NAME}, "
+                "please select an Attendee badge instead of the 12 and Under badge.")
 
 
 @prereg_validation.Attendee
 def attendee_badge_under_13(attendee):
     if not attendee.is_new and attendee.badge_status != c.PENDING_STATUS \
-            or attendee.unassigned_group_reg or attendee.valid_placeholder:
+            or attendee.unassigned_group_reg or attendee.valid_placeholder or not attendee.birthdate:
         return
 
-    if c.PSEUDO_UNDER_13_BADGE in c.PREREG_BADGE_TYPES and attendee.birthdate and attendee.badge_type == c.ATTENDEE_BADGE and (
-            get_age_from_birthday(attendee.birthdate, c.NOW_OR_AT_CON) < 13):
-        return ('badge_type', "If you will be 12 or younger at the start of {}, "
-                "please select the 12 and Under badge instead of an Attendee badge.".format(c.EVENT_NAME))
+    age = get_age_from_birthday(attendee.birthdate, c.NOW_OR_AT_CON)
+
+    if c.PSEUDO_UNDER_13_BADGE in c.PREREG_BADGE_TYPES and attendee.badge_type == c.ATTENDEE_BADGE and (
+            age < 13):
+        return ('badge_type', f"Since you will be {age} year(s) old by the start of {c.EVENT_NAME}, "
+                "please select the 12 and Under badge instead of the Attendee badge.")
 
 
 @prereg_validation.Attendee

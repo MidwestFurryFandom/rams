@@ -169,6 +169,54 @@ def resave_all_attendees_and_groups():
 
 
 @entry_point
+def materialize_room_occupants():
+    """
+    Write an occupant list for every hotel room assignment that has none, from
+    its booker and their lottery group. Safe to run more than once.
+    """
+    from uber.hotel.service import materialize_implied_occupants
+
+    with Session() as session:
+        filled = materialize_implied_occupants(session)
+        session.commit()
+    print(f"Filled in the occupant list of {filled} room(s).")
+
+
+def _hotel_change_flag_catch_up(find, did, would):
+    commit = '--commit' in sys.argv
+    with Session() as session:
+        found = find(session, commit=commit)
+        for ra, changed in found:
+            hotel = ra.inventory.hotel.name if ra.inventory and ra.inventory.hotel else '?'
+            print(f"{hotel}\t{ra.id}\t{', '.join(changed)}")
+        if commit:
+            session.commit()
+    print(f"{len(found)} room(s) {did if commit else would + '; pass --commit'}.")
+
+
+@entry_point
+def flag_rooms_changed_since_export():
+    """
+    One-time catch-up: list the hotel rooms that no longer match the last export
+    file their hotel received but are not marked as changed. Pass --commit to
+    mark them changed since export.
+    """
+    from uber.hotel.exports import flag_rooms_changed_since_export as find
+    _hotel_change_flag_catch_up(find, 'marked as changed', 'would be marked as changed')
+
+
+@entry_point
+def unflag_rooms_changed_by_hotel():
+    """
+    One-time catch-up: list the hotel rooms marked as changed since export only
+    because their hotel uploaded confirmation or cancellation numbers. Pass
+    --commit to clear the mark.
+    """
+    from uber.hotel.exports import unflag_rooms_changed_by_hotel as find
+    _hotel_change_flag_catch_up(find, 'no longer marked as changed', 'would no longer be marked as changed')
+
+
+@entry_point
 def insert_admin():
     with Session() as session:
         if session.insert_test_admin_account():

@@ -746,6 +746,10 @@ def get_age_from_birthday(birthdate, today=None):
     if isinstance(today, six.string_types):
         today = Attendee.coerce_column_data(Attendee, birthdate_col, today)
 
+    if isinstance(birthdate, six.string_types) or isinstance(today, six.string_types):
+        log.error(f"get_age_from_birthday called with malformed birthdate ({birthdate}) or today ({today}) value")
+        return
+
     # int(True) == 1 and int(False) == 0
     upcoming_birthday = int(
         (today.month, today.day) < (birthdate.month, birthdate.day))
@@ -1384,7 +1388,7 @@ class Order:
         return ('-' + field) if field == self.order else field
 
     def __str__(self):
-        return self.order
+        return '&order='.join(listify(self.order))
 
 class RegistrationCode():
     """
@@ -1605,7 +1609,7 @@ def report_critical_exception(msg, subject="Critical Error"):
 
     # Also attempt to email the admins
     if c.SEND_EMAILS and not c.DEV_BOX:
-        with Session() as session:
+        with Session(independent=True) as session:
             EmailService.queue_email(session, 'critical_exception_admin', to=c.ADMIN_EMAIL, sender=c.ADMIN_EMAIL,
                                      subject=subject, body=msg + f'\n{traceback.format_exc()}')
 
@@ -2139,7 +2143,7 @@ class TaskUtils:
         from uber.models import Attendee, AttendeeAccount, DeptMembership, DeptRole
         from functools import partial
 
-        with uber.models.Session() as session:
+        with uber.models.Session(independent=True) as session:
             service, message, target_url = get_api_service_from_server(import_job.target_server,
                                                                        import_job.api_token)
 
@@ -2310,7 +2314,7 @@ class TaskUtils:
     def attendee_account_import(import_job):
         from uber.models import Attendee, AttendeeAccount, BadgeInfo
 
-        with uber.models.Session() as session:
+        with uber.models.Session(independent=True) as session:
             service, message, target_url = get_api_service_from_server(import_job.target_server,
                                                                        import_job.api_token)
 
@@ -2403,7 +2407,7 @@ class TaskUtils:
 
         from uber.models import AttendeeAccount, Group
 
-        with uber.models.Session() as session:
+        with uber.models.Session(independent=True) as session:
             service, message, target_url = get_api_service_from_server(import_job.target_server,
                                                                        import_job.api_token)
 

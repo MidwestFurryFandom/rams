@@ -2,10 +2,12 @@ import json
 import operator
 import os
 import re
+import threading
 import uuid
 import inspect
 import logging
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from functools import wraps
 from itertools import chain
@@ -45,6 +47,17 @@ from uber.utils import check_csrf, normalize_email_legacy, create_new_hash, Dept
 from uber.payments import ReceiptManager
 
 log = logging.getLogger(__name__)
+
+
+def _cherrypy_session():
+    """Return the CherryPy session for the current request, or an empty dict outside one.
+
+    cherrypy.session is not a dict. It is a thread-local proxy that exists once any thread has served a
+    request, and it raises AttributeError on a thread with no request, such as a startup hook.
+    """
+    session = getattr(cherrypy, 'session', {})
+    return session if hasattr(session, 'get') else {}
+
 
 def _make_getter(model):
     def getter(
@@ -164,6 +177,9 @@ class MagModel(SQLModel):
                 disabled_fields = [x for x in fields.keys() if fields[x] is False]
 
         for field in (enabled_fields or self.to_dict_default_attrs):
+            if not hasattr(self, field):
+                continue
+
             val = getattr(self, field)
             if isinstance(val, (datetime, date)):
                 val = val.isoformat()
@@ -859,6 +875,14 @@ class UberSession(sqlalchemy.orm.Session):
                     and hasattr(self.SessionMixin.__dict__[name], '__call__'), name
             UberSession._checked_mixin_names = mixin_names
 
+    def __exit__(self, exc_type, exc_value, traceback):
+        # Callers rely on a clean exit saving their work, as the previous session manager did
+        try:
+            if exc_type is None:
+                self.commit()
+        finally:
+            self.close()
+
     def __getattr__(self, name):
         val = self.SessionMixin.__dict__.get(name) if not name.startswith('__') else None
         if val is None or not hasattr(val, '__call__'):
@@ -929,15 +953,15 @@ class UberSession(sqlalchemy.orm.Session):
 
     class SessionMixin:
         def current_admin_account(self):
-            if getattr(cherrypy, 'session', {}).get('account_id', getattr(cherrypy.request, 'admin_account', None)):
+            if _cherrypy_session().get('account_id', getattr(cherrypy.request, 'admin_account', None)):
                 return self.admin_account(cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None)))
             
         def current_supervisor_admin(self):
-            if getattr(cherrypy, 'session', {}).get('kiosk_supervisor_id'):
+            if _cherrypy_session().get('kiosk_supervisor_id'):
                 return self.admin_account(cherrypy.session.get('kiosk_supervisor_id'))
 
         def admin_attendee(self):
-            if getattr(cherrypy, 'session', {}).get('account_id', getattr(cherrypy.request, 'admin_account', None)):
+            if _cherrypy_session().get('account_id', getattr(cherrypy.request, 'admin_account', None)):
                 try:
                     return self.query(Attendee).join(Attendee.admin_account).filter(
                         AdminAccount.id == cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None))).options(
@@ -947,14 +971,14 @@ class UberSession(sqlalchemy.orm.Session):
                     return
                 
         def kiosk_operator_attendee(self):
-            if self.current_supervisor_admin and getattr(cherrypy, 'session', {}).get('kiosk_operator_id'):
+            if self.current_supervisor_admin and _cherrypy_session().get('kiosk_operator_id'):
                 try:
                     return self.attendee(cherrypy.session.get('kiosk_operator_id'))
                 except NoResultFound:
                     return
 
         def current_attendee_account(self):
-            if c.ATTENDEE_ACCOUNTS_ENABLED and getattr(cherrypy, 'session', {}).get('attendee_account_id', getattr(cherrypy.request, 'attendee_account', None)):
+            if c.ATTENDEE_ACCOUNTS_ENABLED and _cherrypy_session().get('attendee_account_id', getattr(cherrypy.request, 'attendee_account', None)):
                 account_id = cherrypy.session.get('attendee_account_id', getattr(cherrypy.request, 'attendee_account', None))
                 # Handlers ask for this several times per request; reuse the copy already in this session
                 cached = self.info.get('current_attendee_account')
@@ -2282,7 +2306,7 @@ class UberSession(sqlalchemy.orm.Session):
         # ========================
 
         def logged_in_judge(self):
-            account_id = getattr(cherrypy, 'session', {}).get('account_id', getattr(cherrypy.request, 'admin_account', None))
+            account_id = _cherrypy_session().get('account_id', getattr(cherrypy.request, 'admin_account', None))
             if not account_id:
                 raise HTTPRedirect('../landing/index?message=', 'You are not logged in or you do not have judge access.')
             try:
@@ -2451,11 +2475,53 @@ class HybridSessionProxy:
         """
         return getattr(_ScopedSession, name)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args, independent=False, **kwargs):
         """
-        Creates a session with an optional savepoint to allow rollbacks. Sessions use the existing DB connection, if there is one.
+        Returns the request's session when a page handler has one open, so helpers share its connection.
+        Pass independent=True for a unit of work that must commit or roll back on its own.
         """
+        shared = getattr(_request_sessions, 'current', None)
+        if shared is not None and not independent and not args and not kwargs:
+            return _JoinedSession(shared)
         return SessionFactory(*args, **kwargs)
+
+    @contextmanager
+    def for_request(self):
+        """Opens the session that Session() calls on this thread join until the block exits."""
+        previous = getattr(_request_sessions, 'current', None)
+        session = SessionFactory()
+        _request_sessions.current = session
+        try:
+            yield session
+            session.commit()
+        finally:
+            _request_sessions.current = previous
+            session.close()
+
+
+_request_sessions = threading.local()
+
+
+class _JoinedSession:
+    """Stands in for a session opened inside a request: same session, but leaving the block keeps it open."""
+    def __init__(self, session):
+        object.__setattr__(self, '_session', session)
+
+    def __enter__(self):
+        return self._session
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def close(self):
+        pass
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._session, name, value)
+
 
 Session = HybridSessionProxy()
 
@@ -2467,6 +2533,17 @@ def initialize_db():
         if not hasattr(Session.SessionMixin, model.__tablename__):
             setattr(Session.SessionMixin, model.__tablename__, _make_getter(model))
 cherrypy.engine.subscribe('start', initialize_db, priority=97)
+
+
+def _check_pool_covers_threads():
+    threads = cherrypy.server.thread_pool
+    if c.SQLALCHEMY_POOL_SIZE < 0 or c.SQLALCHEMY_MAX_OVERFLOW < 0:
+        return
+    capacity = c.SQLALCHEMY_POOL_SIZE + c.SQLALCHEMY_MAX_OVERFLOW
+    if capacity < threads:
+        log.error(f"DB pool allows {capacity} connections for {threads} server threads; "
+                  "requests will queue for a connection under load. Raise sqlalchemy_pool_size in [secret].")
+cherrypy.engine.subscribe('start', _check_pool_covers_threads, priority=97)
 
 
 def _attendee_validity_check():

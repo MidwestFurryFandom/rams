@@ -50,8 +50,8 @@ from uber.hotel.imports import (apply_cancellation_rows, apply_confirmation_rows
                                 parse_iso_date, parse_spreadsheet)
 from uber.hotel.service import (RoomAssignmentError, add_room_occupant, apply_room_assignment_edits,
                                 assign_physical_room, cancel_room_occupant_invite,
-                                create_room_assignment, remove_room_occupant,
-                                validate_physical_room)
+                                create_room_assignment, hotel_sourced_changes, remove_room_occupant,
+                                require_room_badge, validate_physical_room)
 from uber.hotel.solver import (LOTTERY_TYPE_BOTH,
                                        adjust_available_rooms,
                                        build_eligible_applications,
@@ -1283,6 +1283,27 @@ class Root:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
+    @ajax
+    def vault_aoc(self, session):
+        """Link to PCI Vault's current PCI DSS Attestation of Compliance.
+
+        Fetched on demand (not on page load) because the document is
+        confidential; the link is returned to the admin's browser and never
+        logged or stored.
+        """
+        if not c.VAULT_ENABLED:
+            return {'error': 'Vault integration is not enabled.'}
+
+        from uber.vault import get_certificate_url
+
+        try:
+            url = get_certificate_url()
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+        if not url:
+            return {'success': False, 'error': 'PCI Vault did not return a certificate link.'}
+        return {'success': True, 'url': url}
+
     def manage_hotels(self, session, message=''):
         hotels = session.query(LotteryHotel).order_by(LotteryHotel.name).all()
         return {
@@ -1749,7 +1770,7 @@ class Root:
         message = "; ".join(msg_parts) or "No matching rows to import."
         raise HTTPRedirect('export_tracking?message={}', message)
 
-    def hotel_export_details(self, session, hotel_id, page='1', page_size='25'):
+    def hotel_export_details(self, session, hotel_id, page='1', page_size='25', pending_only=''):
         """Per-room export/import detail for a single hotel, used by the
         modal on the export tracking page. Returns a server-rendered
         partial (no base layout) for direct injection into the modal body.
@@ -1783,6 +1804,12 @@ class Root:
                           RoomAssignment.is_live)
                   .order_by(RoomAssignment.parent_assignment_id.asc().nullsfirst(),
                             RoomAssignment.created.asc()))
+        if pending_only and last_export:
+            # Everything derive_sync_status would not call in_sync.
+            base_q = base_q.filter(or_(
+                RoomAssignment.last_modified_at > last_export.exported_at,
+                RoomAssignment.hotel_confirmation_number == None,  # noqa: E711
+                func.trim(RoomAssignment.hotel_confirmation_number) == ''))
         assignments, total, page_num, page_count = paginate(
             base_q, page, page_size, default_size=25, min_size=5, max_size=200)
         ps = clamp_page_size(page_size, default_size=25, min_size=5, max_size=200)
@@ -1797,6 +1824,7 @@ class Root:
             'hotel': hotel,
             'last_export': last_export,
             'bookings': bookings,
+            'pending_only': bool(pending_only),
             'page': page_num,
             'page_size': ps,
             'total': total,
@@ -2211,8 +2239,9 @@ class Root:
         confirmation = (row.get('mapped') or {}).get(
             'assignment.hotel_confirmation_number', '').strip()
         if confirmation:
-            ra.hotel_confirmation_number = confirmation
-            session.add(ra)
+            with hotel_sourced_changes(session):
+                ra.hotel_confirmation_number = confirmation
+                session.add(ra)
 
         previous_status = row.get('status')
         row['assignment_ids'] = [str(ra.id)]
@@ -3536,6 +3565,13 @@ class Root:
                                            assignment.id, msg)
 
                     if picked_attendee != assignment.attendee_id:
+                        new_booker = session.query(Attendee).get(picked_attendee)
+                        if not new_booker:
+                            fail('Attendee not found.')
+                        try:
+                            require_room_badge(new_booker)
+                        except RoomAssignmentError as e:
+                            fail(e.message)
                         assignment.attendee_id = picked_attendee
                         session.add(assignment)
                     if (not assignment.assignment_reason
@@ -3591,6 +3627,10 @@ class Root:
                 params['attendee_id'])
             if prefill_attendee:
                 assignment.attendee_id = prefill_attendee.id
+                try:
+                    require_room_badge(prefill_attendee)
+                except RoomAssignmentError as e:
+                    message = message or e.message
 
         # Availability per inventory block, per scope: '' keys the main
         # (unpartitioned) pool, partition ids key their blocks.
@@ -4200,7 +4240,7 @@ class Root:
         q = build_room_assignment_query(
             session, status=status, hotel_id=hotel_id,
             partition_id=partition_id, search=search_term,
-            attendee_id=attendee_id)
+            attendee_id=attendee_id, include_roommate_rooms=True)
 
         # Column sort. Joins use aliases so they can't collide with the
         # joins the shared query layer adds for searching. The default

@@ -10,7 +10,7 @@ from uber.config import c
 from uber.hotel import mapping
 from uber.hotel.imports import parse_spreadsheet
 
-from tests.hotel.factories import (make_assignment, make_attendee, make_hotel,
+from tests.hotel.factories import (make_application, make_assignment, make_attendee, make_hotel,
                                    make_inventory, make_room_type)
 
 
@@ -408,3 +408,58 @@ def test_header_map_round_trips(session):
 
     stored = session.query(ImportMappingTemplate).get(template.id)
     assert stored.header_map == {'acknowledgement_number': 'Acknowledgement Number'}
+
+
+def test_hotel_supplied_values_are_not_changes_the_hotel_has_yet_to_see(session, no_cherrypy_session):
+    from uber.hotel.imports import apply_cancellation_rows, apply_confirmation_rows, import_confirmation_file
+
+    def unstamped(email):
+        ra = _booking(session, email=email)
+        ra.last_modified_at = None
+        session.flush()
+        return ra
+
+    templated, synced, confirmed, cancelled, ours = [
+        unstamped(f'{name}@example.com') for name in ('templated', 'synced', 'confirmed', 'cancelled', 'ours')]
+    app = make_application(session, confirmed.attendee, confirmation_num='LOTTERY1')
+    confirmed.lottery_application_id = cancelled.lottery_application_id = app.id
+    session.flush()
+    assert confirmed.last_modified_at is None
+
+    raw = _room_list_csv([{'email': 'templated@example.com', 'acknowledgement_number': 'ACK1'}])
+    import_confirmation_file(session, raw, 'list.csv', template=mapping.builtin_template())
+    mapping.sync_value(session, synced, 'assignment.assigned_check_out_date', '2027-01-12')
+    apply_confirmation_rows(session, [{'confirmation_num': 'LOTTERY1', 'new_confirmation_num': 'ACK2'}])
+    assert templated.hotel_confirmation_number == 'ACK1' and confirmed.hotel_confirmation_number == 'ACK2'
+    apply_cancellation_rows(session, [{'confirmation_num': 'LOTTERY1', 'cancellation_confirmation_number': 'X1'}])
+    assert cancelled.status == c.CANCELLED
+    assert [ra.last_modified_at for ra in (templated, synced, confirmed, cancelled)] == [None] * 4
+
+    # Our own edits afterwards still count.
+    ours.special_requests = 'Low floor'
+    session.flush()
+    assert ours.last_modified_at is not None
+
+
+def test_our_room_number_edits_flag_the_room_but_the_hotels_do_not(session, no_cherrypy_session):
+    ra = _booking(session)
+    ra.last_modified_at = None
+    session.flush()
+
+    mapping.sync_value(session, ra, 'assignment.room_number', '301')
+    assert ra.room_number == '301' and ra.last_modified_at is None
+
+    ra.room_number = '302'
+    session.flush()
+    assert ra.last_modified_at is not None
+
+    # Placing the booking in a catalogued room sets the number too.
+    from uber.models.hotel import PhysicalRoom
+    room = PhysicalRoom(hotel_id=ra.inventory.hotel_id, inventory_id=ra.inventory_id, room_number='410', floor='4')
+    session.add(room)
+    session.flush()
+    ra.last_modified_at = None
+    session.flush()
+    ra.physical_room_id = room.id
+    session.flush()
+    assert ra.room_number == '410' and ra.last_modified_at is not None

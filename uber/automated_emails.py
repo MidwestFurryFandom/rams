@@ -10,10 +10,10 @@ from sqlalchemy.orm import joinedload, subqueryload
 from uber.config import c
 from uber import decorators
 from uber.jinja import JinjaEnv
-from uber.models import (AdminAccount, Attendee, AttendeeAccount, ArtShowApplication, ArtShowBidder, AutomatedEmail, AttractionSignup, Department,
-                         Email, Group, GuestGroup, IndieGame, IndieJudge, IndieStudio, ArtistMarketplaceApplication, MITSTeam,
+from uber.models import (AdminAccount, Attendee, AttendeeAccount, ArtShowApplication, ArtShowBidder, AutomatedEmail, AttractionSignup,
+                         BadgeWaitlistSignup, Group, GuestGroup, IndieGame, IndieJudge, IndieStudio, ArtistMarketplaceApplication, MITSTeam,
                          MITSApplicant, ReceiptInfo, PanelApplication, PanelApplicant, PromoCode, PromoCodeGroup, LotteryApplication,
-                         RoomAssignment, Shift)
+                         RoomAssignment, RoomAssignmentInvite, Shift)
 from uber.utils import after, before, days_after, days_before, days_between, localized_now, DeptChecklistConf
 
 log = logging.getLogger(__name__)
@@ -73,6 +73,7 @@ class AutomatedEmailFixture:
             replyto: list[str] = [],
             allow_at_the_con=False,
             allow_post_con=False,
+            ignore_gets_emails=False,
             extra_data=None):
 
         assert ident, 'AutomatedEmail ident may not be empty.'
@@ -107,6 +108,7 @@ class AutomatedEmailFixture:
         self.replyto = replyto
         self.allow_at_the_con = allow_at_the_con
         self.allow_post_con = allow_post_con
+        self.ignore_gets_emails = ignore_gets_emails
         self.extra_data = extra_data or {}
 
         when = when
@@ -272,6 +274,71 @@ if c.GROUPS_ENABLED:
         sender=c.REGDESK_EMAIL
     )
 
+if c.BADGE_WAITLIST_ENABLED:
+    AutomatedEmailFixture(
+        AttendeeAccount,
+        f'{c.EVENT_NAME} Badge Waitlist Signup Confirmation',
+        'reg_workflow/badge_waitlist_confirm.html', None,
+        'badge_waitlist_account_confirm',
+        send_filter="lambda a: a.pending_waitlist_signups",
+        sender=c.BADGE_WAITLIST_EMAIL,
+    )
+
+    AutomatedEmailFixture(
+        BadgeWaitlistSignup,
+        f'You Are Now Signed Up For the {c.EVENT_NAME} Badge Waitlist!',
+        'reg_workflow/badge_waitlist_position.html',
+        "lambda s: s.status == c.PENDING and s.waitlist_position != 0 and s.normalized_email != s.attendee_account.normalized_email \
+            and not s.attendee_id and not s.offered_badge",
+        'badge_waitlist_confirm',
+        sender=c.BADGE_WAITLIST_EMAIL,
+    )
+
+    AutomatedEmailFixture(
+        BadgeWaitlistSignup,
+        f'{c.EVENT_NAME} Badge Waitlist Signup Cancelled',
+        'reg_workflow/badge_waitlist_cancelled.html',
+        "lambda s: s.status == c.CANCELLED and s.waitlist_position != 0 and s.normalized_email != s.attendee_account.normalized_email",
+        'badge_waitlist_cancel',
+        sender=c.BADGE_WAITLIST_EMAIL,
+    )
+
+    AutomatedEmailFixture(
+        BadgeWaitlistSignup,
+        f'{c.EVENT_NAME} Badge Waitlist Signup Expired',
+        'reg_workflow/badge_waitlist_expired.html',
+        "lambda s: s.status == c.EXPIRED and s.waitlist_position != 0",
+        'badge_waitlist_expire',
+        sender=c.BADGE_WAITLIST_EMAIL,
+    )
+
+    AutomatedEmailFixture(
+        AttendeeAccount,
+        f'Your {c.EVENT_NAME} Waitlist Badge Is Available!',
+        'reg_workflow/badge_waitlist_offer.html', None,
+        'badge_waitlist_offer',
+        send_filter="lambda a: a.offered_waitlist_signups",
+        sender=c.BADGE_WAITLIST_EMAIL,
+    )
+
+    AutomatedEmailFixture(
+        BadgeWaitlistSignup,
+        f'Your {c.EVENT_NAME} Waitlist Badge Is Available!',
+        'reg_workflow/badge_waitlist_offered.html',
+        "lambda s: s.offered_badge and not s.attendee_id and s.status == c.PENDING and s.waitlist_position != 0 and \
+            s.normalized_email != s.attendee_account.normalized_email",
+        'badge_waitlist_offered',
+        sender=c.BADGE_WAITLIST_EMAIL,
+    )
+
+    AutomatedEmailFixture(
+        Attendee,
+        'Your Badge Has Been Refunded',
+        'reg_workflow/waitlist_refund.html', None,
+        'waitlist_refund_processed',
+        sender=c.BADGE_WAITLIST_EMAIL,
+        ignore_gets_emails=True,
+    )
 
 if c.TRANSFERABLE_BADGE_TYPES:
     AutomatedEmailFixture(
@@ -565,7 +632,8 @@ if c.ART_SHOW_ENABLED:
         f'Your {c.EVENT_NAME} Art Show application has been declined',
         'art_show/declined.txt',
         "lambda a: a.status == c.DECLINED",
-        'art_show_declined')
+        'art_show_declined',
+        ignore_gets_emails=True)
 
     ArtShowAppEmailFixture(
         f'Your {c.EVENT_NAME} Art Show payment has been received',
@@ -662,7 +730,8 @@ if c.MARKETPLACE_REG_START:
         f'Your {c.EVENT_NAME} Artist Marketplace application has been declined',
         'marketplace/declined.txt',
         "lambda a: a.status == c.DECLINED",
-        'marketplace_declined')
+        'marketplace_declined',
+        ignore_gets_emails=True)
 
     ArtistMarketplaceEmailFixture(
         f'Reminder to pay for your {c.EVENT_NAME} Artist Marketplace application',
@@ -731,6 +800,7 @@ if c.DEALER_REG_START:
         'dealers/badge_converted.html', None,
         'dealer_decline_convert',
         sender=c.MARKETPLACE_EMAIL,
+        ignore_gets_emails=True,
     )
 
     AutomatedEmailFixture(
@@ -739,6 +809,7 @@ if c.DEALER_REG_START:
         'dealers/badge_converted.html', None,
         'dealer_waitlist_exhausted',
         sender=c.MARKETPLACE_EMAIL,
+        ignore_gets_emails=True,
     )
 
     MarketplaceEmailFixture(
@@ -759,7 +830,8 @@ if c.DEALER_REG_START:
         'dealers/declined.txt',
         "lambda g: g.status == c.DECLINED and g.badges_purchased > 0",
         'dealer_reg_declined',
-        shared_ident='dealer_reg_declined')
+        shared_ident='dealer_reg_declined',
+        ignore_gets_emails=True)
 
     MarketplaceEmailFixture(
         f'Your {c.EVENT_NAME} {c.DEALER_APP_TERM.capitalize()} has been approved',
@@ -1216,10 +1288,14 @@ HotelLotteryEmailFixture(
     'group_lottery_member_joined'
 )
 
-HotelLotteryEmailFixture(
+# Queued on the invite, not a LotteryApplication. send_automated_emails only picks up emails whose
+# model is some fixture's model, so this fixture must name RoomAssignmentInvite.
+AutomatedEmailFixture(
+    RoomAssignmentInvite,
     f'You have a room at {c.EVENT_NAME}',
     'hotel/room_occupant_invite.html', None,
-    'room_occupant_invite'
+    'room_occupant_invite',
+    sender=c.HOTEL_LOTTERY_EMAIL,
 )
 HotelLotteryEmailFixture(
     f'Someone joined your {c.EVENT_NAME} room',
@@ -1496,7 +1572,8 @@ if c.INDIE_ARCADE_START:
         f'Your game application has been declined from the {c.EVENT_YEAR} Indie Arcade',
         'indie_arcade/game_declined.txt',
         "lambda game: game.status == c.DECLINED and game.showcase_type == c.INDIE_ARCADE",
-        'ia_game_declined')
+        'ia_game_declined',
+        ignore_gets_emails=True)
 
     IAEmailFixture(
         IndieGame,
@@ -1573,7 +1650,8 @@ if c.MIVS_START:
         'Your game application has been declined from MIVS',
         'mivs/game_declined.txt',
         "lambda game: game.status == c.DECLINED and game.showcase_type == c.MIVS",
-        'mivs_game_declined')
+        'mivs_game_declined',
+        ignore_gets_emails=True)
 
     MIVSEmailFixture(
         IndieGame,
@@ -1860,9 +1938,11 @@ class PanelAppEmailFixture(AutomatedEmailFixture):
         panel_filter = None
         if filter:
             if callable(filter):
-                panel_filter = lambda a: (not a.submitter or not a.submitter.attendee_id) and filter(a)
+                panel_filter = lambda a: (not a.submitter or not a.submitter.attendee_id or
+                                          getattr(a.submitter.attendee, 'badge_type', None) != c.GUEST_BADGE) and filter(a)
             else:
-                panel_filter = f"lambda a: (not a.submitter or not a.submitter.attendee_id) and eval({filter.encode()})(a)"
+                panel_filter = f"lambda a: (not a.submitter or not a.submitter.attendee_id or \
+                    getattr(a.submitter.attendee, 'badge_type', None) != c.GUEST_BADGE) and eval({filter.encode()})(a)"
 
         AutomatedEmailFixture.__init__(
             self,
@@ -1896,7 +1976,8 @@ if c.PANELS_START:
         'panels/panel_app_declined.html',
         "lambda app: app.status == c.DECLINED and app.department in c.EMAILLESS_PANEL_DEPTS",
         'panel_declined',
-        shared_ident='panelapps_declined')
+        shared_ident='panelapps_declined',
+        ignore_gets_emails=True)
 
     PanelAppEmailFixture(
         f'Your {c.EVENT_NAME} Panel Application Has Been Waitlisted: ' + '{app.name}',
@@ -1927,7 +2008,7 @@ if c.PANELS_START:
         'panels/panel_app_scheduled.html',
         "lambda app: app.event_id and app.department in c.EMAILLESS_PANEL_DEPTS",
         'panel_scheduled',
-        shared_ident='panelapps_received')
+        shared_ident='panelapps_scheduled')
 
     AutomatedEmailFixture(
         Attendee,
