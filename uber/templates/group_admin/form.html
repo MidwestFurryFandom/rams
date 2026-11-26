@@ -39,7 +39,7 @@
       </div>
       {% endif %}
     </div>
-    {% if (c.AT_THE_CON or c.AFTER_PREREG_TAKEDOWN) and group.amount_unpaid %}
+    {% if c.AT_THE_CON and group.amount_unpaid %}
       <div class="alert alert-warning center" role="alert">
         <h4>{{ group.name }} currently owes <strong>{{ group.amount_unpaid|format_currency }}</strong>.</h4>
         {% if payment_enabled %}
