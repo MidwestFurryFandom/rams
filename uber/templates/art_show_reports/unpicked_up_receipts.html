@@ -1,0 +1,47 @@
+{% extends "base.html" %}{% set admin_area=True %}
+{% set title_text = "Unpicked Up Art By Bidder" %}
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <h2 class="mb-3">Unpicked Up Art Report</h2>
+        <table class="table table-striped datatable">
+        <thead>
+            <tr>
+            <th>Bidder Number</th>
+            <th>Bidder Name</th>
+            <th>Badge Number</th>
+            <th>Phone Number</th>
+            <th>Email Address</th>
+            <th>Unpicked Up Art Count</th>
+            <th>Total Amount Due</th>
+            <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for receipt in receipts %}
+        {% set receipt_attendee = receipt.attendee or {} %}
+        <tr id="{{ receipt.id }}">
+            <td>
+                {{ receipt_attendee.art_show_bidder.bidder_num if receipt_attendee.art_show_bidder else 'None' }}
+            </td>
+            <td>{{ receipt_attendee.full_name }}</td>
+            <td>{{ receipt_attendee.badge_num }}</td>
+            <td>{{ receipt_attendee.cellphone }}</td>
+            <td>{{ receipt_attendee.email }}</td>
+            <td>{{ receipt.pieces|length }}</td>
+            <td>{{ (receipt.owed / 100)|format_currency }}</td>
+            <td class="d-flex gap-1">
+                <a href="../art_show_admin/pieces_bought?id={{ receipt.id }}" target="_blank" class="btn btn-sm btn-primary">View Receipt <i class="fa fa-external-link"></i></a>
+                <form target="_blank" role="form" method="post" action="../art_show_admin/print_receipt">
+                    <input type="hidden" name="id" value="{{ receipt.id }}" />
+                    {{ csrf_token() }}
+                    <button class="btn btn-sm btn-secondary">Print Invoice</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

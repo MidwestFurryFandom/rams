@@ -640,6 +640,8 @@ class Job(MagModel, table=True):
 
     @property
     def slots_untaken(self):
+        if not self.slots:
+            return 0
         return max(0, self.slots - self.slots_taken)
 
     @property
@@ -1024,6 +1026,11 @@ class Shift(MagModel, table=True):
 
     attendee_id: str | None = Field(sa_type=Uuid(as_uuid=False), foreign_key='attendee.id', ondelete='CASCADE')
     attendee: 'Attendee' = Relationship(back_populates="shifts", sa_relationship_kwargs={'lazy': 'joined'})
+
+    checked_in: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
+    checked_out: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
+    job_start_override: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
+    job_end_override: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
     
     worked: int = Field(sa_column=Column(Choice(c.WORKED_STATUS_OPTS)), default=c.SHIFT_UNMARKED)
     rating: int = Field(sa_column=Column(Choice(c.RATING_OPTS)), default=c.UNRATED)

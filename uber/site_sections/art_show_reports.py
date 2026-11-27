@@ -46,6 +46,17 @@ class Root:
             'end': end,
         }
 
+    def unpicked_up_receipts(self, session, message=''):
+        open_receipts = session.query(ArtShowReceipt).filter(ArtShowReceipt.closed == None).options(
+            selectinload(ArtShowReceipt.pieces), selectinload(ArtShowReceipt.art_show_payments),
+            joinedload(ArtShowReceipt.attendee).joinedload(Attendee.art_show_bidder)
+        )
+
+        return {
+            'message': message,
+            'receipts': open_receipts,
+        }
+
     def artist_invoices(self, session, message=''):
         apps = session.query(ArtShowApplication).join(ArtShowApplication.art_show_pieces)\
             .filter(ArtShowApplication.art_show_pieces.any(ArtShowPiece.status.in_([c.SOLD, c.PAID]))).all()

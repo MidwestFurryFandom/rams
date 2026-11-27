@@ -158,9 +158,7 @@ class EmailService:
         if to_model.__class__ not in set([fixture.model for fixture in AutomatedEmail._fixtures.values()]):
             return
         
-        if not AutomatedEmail.initialized:
-            AutomatedEmail.reconcile_fixtures()
-            AutomatedEmail.initialized = True
+        AutomatedEmail.ensure_fixtures_reconciled()
 
         model_str = to_model.__class__.__name__
         active_automated_emails = session.query(AutomatedEmail).filter(
@@ -195,7 +193,10 @@ class EmailService:
                     email_handler.queue_email_obj(session)
                 elif existing and not fixture.filter(to_model):
                     for email in existing:
-                        if email.status != c.SENT:
+                        # An email found by shared ident can belong to another automated email; its own filter decides.
+                        own_fixture = email.automated_email.fixture if email.automated_email else None
+                        own_filter = own_fixture and (own_fixture.filter or own_fixture.send_filter)
+                        if email.status != c.SENT and not (own_filter and own_filter(to_model)):
                             session.delete(email)
 
     @staticmethod
@@ -271,6 +272,13 @@ class EmailService:
         if not to_model and email.fk_id:
             model_class = email.model_class
             to_model = session.query(model_class).filter(model_class.id == email.fk_id).first()
+
+        if fixture_obj and not fixture_obj.fixture:
+            email.error = f"Fixture {email.ident} is no longer defined and cannot be sent"
+            session.add(email)
+            return
+
+        fixture = fixture_obj.fixture if fixture_obj else None
         
         # Check that the object associated with this email still exists and is still eligible for emails
         if email.fk_id:
@@ -282,16 +290,10 @@ class EmailService:
                 email.error = f"Model {to_model} does not have an email address"
                 session.add(email)
                 return
-            if not to_model.gets_emails:
+            if not to_model.gets_emails and (not fixture or not fixture.ignore_gets_emails):
                 session.delete(email)
                 return
 
-        if fixture_obj and not fixture_obj.fixture:
-            email.error = f"Fixture {email.ident} is no longer defined and cannot be sent"
-            session.add(email)
-            return
-
-        fixture = fixture_obj.fixture if fixture_obj else None
         local_now_str = localized_now().strftime('%b %-d %-I:%M%p')
 
         if to_model:

@@ -8,7 +8,7 @@ last_paid: {{ attendee.paid|tojson }},
 badge_status: {{ badge_flags.badge_status.data|tojson }},
 no_badge_num: {{ (not attendee.badge_num)|tojson }},
 paid: {{ badge_flags.paid.data|tojson }},
-can_transfer: {{ badge_flags.can_transfer.data|tojson if not attendee.is_inherently_transferable else 'true' }},
+transferable: {{ badge_flags.transferable.data|tojson }},
 preassignedBadge() { return {{ c.PREASSIGNED_BADGE_TYPES|tojson }}.includes(this.badge_type) },
 setPaidStatus() {
     if (this.badge_status == {{ c.REFUNDED_STATUS|tojson }}) {
@@ -87,8 +87,10 @@ get noBadgeNumText() { return this.preassignedBadge() ? 'Use next available badg
         <div class="col-sm">
             <div class="form-text">Account Email{{ attendee.managers|length|pluralize }}</div>
             <div class="mb-4">
+                {# Write access to the account page or all of Reg Admin; a single-page access group grant counts #}
+                {% set can_open_account = c.has_section_or_page_access('/reg_admin/attendee_account_form') %}
                 {% for manager in attendee.managers %}
-                    {% if not loop.first %} / {% endif %}{{ manager.email }}{% if c.HAS_REG_ADMIN_ACCESS %} (<a href="../reg_admin/attendee_account_form?id={{ manager.id }}" target="_blank">View, Manage, & Refund</a>){% endif %}<br/>
+                    {% if not loop.first %} / {% endif %}{{ manager.email }}{% if can_open_account %} (<a href="../reg_admin/attendee_account_form?id={{ manager.id }}" target="_blank">View, Manage, & Refund</a>){% endif %}<br/>
                     {% if manager.attendees|length > 1 %}
                     <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#other-badges" aria-expanded="false" aria-controls="other-badges">
                         View Other Attendees on Account
@@ -134,25 +136,19 @@ get noBadgeNumText() { return this.preassignedBadge() ? 'Use next available badg
     {% endif %}
     {% if c.TRANSFERABLE_BADGE_TYPES|length > 0 %}
         {% set transfer_admin_text %}
-            {% if attendee.is_inherently_transferable %}
-                This attendee can currently transfer their badge.
-            {% else %}
-                This attendee can {% if attendee.can_transfer %}only transfer their badge with this override turned on{% else %}<strong>NOT</strong> currently transfer their badge{% endif %}.
-            {% endif %}
+            The system default for this attendee will{% if attendee.is_inherently_transferable %} NOT{% endif %} let them transfer their badge.
         {% endset %}
         <div class="col-sm">
-            <div class="form-text">Is Transferable</div>
+            {% if attendee.cannot_transfer_reason %}
+            <div class="form-text">Badge Transferability</div>
             <div class="mb-3">
-                {% if attendee.is_inherently_transferable %}
-                    This attendee can currently transfer their badge.
-                {% elif attendee.cannot_transfer_reason %}
-                    This attendee cannot transfer their badge under any circumstances because {{ attendee.cannot_transfer_reason|readable_join }}.
-                {% else %}
-                    {{ form_macros.input(badge_flags.can_transfer, admin_text=transfer_admin_text, alpine_model="can_transfer") }}
-                {% endif %}
-                <div x-show="can_transfer">
-                    {{ form_macros.input(badge_flags.transfer_code, show_label=False, admin_text="Set or unset a code above for use in badge transfers.") }}
-                </div>
+                This attendee cannot transfer their badge under any circumstances because {{ attendee.cannot_transfer_reason|readable_join }}.
+            </div>
+            {% else %}
+                {{ form_macros.input(badge_flags.transferable, admin_text=transfer_admin_text, alpine_model="transferable") }}
+            {% endif %}
+            <div x-show="can_transfer">
+                {{ form_macros.input(badge_flags.transfer_code, show_label=False, admin_text="Set or unset a code above for use in badge transfers.") }}
             </div>
         </div>
     {% endif %}
@@ -167,6 +163,25 @@ get noBadgeNumText() { return this.preassignedBadge() ? 'Use next available badg
         {% else %}
             This attendee does not have an admin account.
         {% endif %}
+        </div>
+    </div>
+{% endif %}
+{% if c.BADGE_WAITLIST_ENABLED %}
+</div>
+<div class="row g-3 mb-3">
+    <div class="col-sm">
+        <div class="form-text">Waitlist Signup</div>
+        <div class="mb-3">
+            {% if attendee.waitlist_signup %}
+            Yes, signed up {{ attendee.waitlist_signup.signup_time|datetime_local("%-I:%M%p %b %-d") }}
+            as {{ attendee.waitlist_signup.full_name }}{% if attendee.waitlist_signup.legal_name %} ({{ attendee.waitlist_signup.legal_name }}){% endif %}
+            {% else %}None{% endif %}
+        </div>
+    </div>
+    <div class="col-sm">
+        <div class="form-text">Waitlist Refund</div>
+        <div class="mb-3">
+            {{ attendee.waitlist_refund|form_link(new_window=True) or 'None' }}
         </div>
     </div>
 {% endif %}

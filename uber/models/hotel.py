@@ -1127,6 +1127,8 @@ class RoomAssignment(MagModel, table=True):
     last_modified_at: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
     last_confirmed_at: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
     admin_notes: str = ''
+    # Shown to a staff crash space room's occupants; tuber's room `messages`.
+    occupant_message: str = ''
 
     # Occupants (who's sleeping in the room). Distinct from `attendee` which
     # is the booker / name on the reservation. Group leaders edit this per
@@ -1231,18 +1233,21 @@ class RoomAssignment(MagModel, table=True):
         return self.assignment_reason == c.STAFF_CRASH_SPACE
 
     @property
-    def effective_occupants(self):
-        """Attendees sleeping in this room: the managed occupants list when
-        set, else the booker plus their group members (the solver's default
-        before anyone edits the list). Always a list of Attendee records."""
-        if self.occupants:
-            return list(self.occupants)
+    def implied_occupants(self):
+        """The booker plus their lottery group's valid members: who is in the
+        room when it has no occupant list of its own."""
         occupants = [self.attendee] if self.attendee else []
         app = self.lottery_application
         if app:
             occupants.extend(m.attendee for m in (app.valid_group_members or [])
-                             if m.attendee)
+                             if m.attendee and m.attendee not in occupants)
         return occupants
+
+    @property
+    def effective_occupants(self):
+        """Attendees sleeping in this room: the occupants list, else the
+        implied occupants. Always a list of Attendee records."""
+        return list(self.occupants) if self.occupants else self.implied_occupants
 
     @property
     def payment_type_config(self):
@@ -1503,6 +1508,9 @@ class RoomAssignment(MagModel, table=True):
         the hotel's record of who's checking in doesn't match anyone in
         the room.
         """
+        if not self.is_new and not self.occupants:
+            # Without this, saving a room that had no list would drop its implied group members.
+            self.occupants.extend(self.implied_occupants)
         if not self.attendee_id:
             return
         attendee = self.attendee
@@ -1520,11 +1528,26 @@ class RoomAssignment(MagModel, table=True):
         tracked = ['attendee_id', 'inventory_id', 'partition_id', 'assignment_reason',
                    'status', 'payment_type', 'assigned_check_in_date', 'assigned_check_out_date',
                    'deposit_cutoff_date', 'booking_url', 'hotel_confirmation_number',
-                   'cancellation_confirmation_number', 'special_requests', 'hotel_rewards_number',
+                   'cancellation_confirmation_number', 'room_number', 'special_requests', 'hotel_rewards_number',
                    'cc_token', 'cc_captured_at',
                    'address1', 'address2', 'city', 'region', 'zip_code', 'country']
-        if any(getattr(self, f) != self.orig_value_of(f) for f in tracked):
+        session = object_session(self)
+        if session is not None and session.info.get('hotel_sourced'):
+            # The hotel made this change, so it has already seen it.
+            return
+        if any(getattr(self, f) != self.orig_value_of(f) for f in tracked) or self._roommates_changed():
             self.last_modified_at = datetime.now(UTC)
+
+    def _roommates_changed(self):
+        """Whether this flush changes who is in the room. Writing out a
+        room's implied occupants as its list is not a change."""
+        state = sa.inspect(self).attrs.occupants
+        if not state.history.has_changes():
+            return False
+        history = state.load_history()
+        before = list(history.unchanged or ()) + list(history.deleted or ())
+        return ({a.id for a in before or self.implied_occupants}
+                != {a.id for a in self.effective_occupants})
 
 
 class RoomAssignmentInvite(MagModel, table=True):

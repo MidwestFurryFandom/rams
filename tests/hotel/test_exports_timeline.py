@@ -20,7 +20,10 @@ from tests.hotel.factories import (N, make_application, make_assignment,
                                    make_attendee, make_hotel, make_inventory)
 
 
-def _track(session, ra, when, data="room_number=''301' -> '302''"):
+STAMPED = ", last_modified_at='None -> datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=<UTC>)'"
+
+
+def _track(session, ra, when, data="special_requests='None -> 'Low floor''" + STAMPED):
     from uber.config import c
     session.add(Tracking(model='RoomAssignment', fk_id=ra.id, when=when,
                          who='Tester', which=repr(ra), data=data,
@@ -210,8 +213,7 @@ def test_import_changes_are_not_double_counted_in_gap_rows(session):
     # an admin edit afterward.
     _track(session, ra, base + timedelta(hours=1, milliseconds=200),
            data="hotel_confirmation_number='None -> 'FROM-HOTEL''")
-    _track(session, ra, base + timedelta(hours=2),
-           data="room_number=''301' -> '302''")
+    _track(session, ra, base + timedelta(hours=2))
     session.flush()
 
     timeline = hotel_activity_timeline(session, hotel.id)
@@ -222,7 +224,7 @@ def test_import_changes_are_not_double_counted_in_gap_rows(session):
     assert changes[0]['count'] == 1
     gap = changed_rooms_between(session, hotel.id, changes[0]['start'],
                                 changes[0]['end'], exclude_imports=True)
-    assert [f for row in gap for f, _o, _n in row['changes']] == ['room_number']
+    assert [f for row in gap for f, _o, _n in row['changes']] == ['special_requests']
 
     # And the import row still reports its own change.
     from uber.hotel.exports import import_changes
@@ -398,3 +400,174 @@ def test_legacy_applied_import_reads_processed(session):
     # An explicit status always wins over the applied window.
     imported.status = 'pending'
     assert imported.effective_status == 'pending'
+
+
+def test_details_pending_only_hides_in_sync_rooms(session, no_cherrypy_session):
+    from uber.site_sections import hotel_lottery_admin
+
+    hotel = make_hotel(session)
+    inv = make_inventory(session, hotel)
+    synced, changed, unconfirmed = [
+        make_assignment(session, make_attendee(session), inventory=inv, check_in=N[1], check_out=N[3],
+                        hotel_confirmation_number=number) for number in ('H1', 'H2', '')]
+    details = lambda **params: inspect.unwrap(hotel_lottery_admin.Root.hotel_export_details)(  # noqa: E731
+        hotel_lottery_admin.Root(), session, hotel_id=hotel.id, **params)
+
+    # Before any export everything is pending.
+    assert details(pending_only='1')['total'] == 3
+
+    export = store_export_file(session, hotel, b'a\n1\n', 'first.csv', 'text/csv', source='admin', record_count=3)
+    for ra in (synced, changed, unconfirmed):
+        ra.last_modified_at = export.exported_at - timedelta(hours=1)
+    changed.last_modified_at = export.exported_at + timedelta(hours=1)
+    session.flush()
+
+    assert details()['total'] == 3
+    pending = details(pending_only='1')
+    assert pending['total'] == 2
+    assert {row['assignment'].id for row in pending['bookings']} == {changed.id, unconfirmed.id}
+    assert {row['sync_status'] for row in pending['bookings']} == {'pending_export', 'awaiting_confirmation'}
+
+
+def test_roommate_changes_count_as_changed_since_export(session, no_cherrypy_session):
+    from uber.hotel.exports import derive_sync_status
+    from uber.hotel.service import add_room_occupant, remove_room_occupant
+
+    hotel = make_hotel(session)
+    ra = make_assignment(session, make_attendee(session), inventory=make_inventory(session, hotel),
+                         check_in=N[1], check_out=N[3], hotel_confirmation_number='H1')
+    mate = make_attendee(session)
+    export = store_export_file(session, hotel, b'a\n1\n', 'first.csv', 'text/csv', source='admin', record_count=1)
+
+    def settle():
+        ra.last_modified_at = export.exported_at - timedelta(hours=1)
+        session.flush()
+        assert derive_sync_status(ra, export) == 'in_sync'
+
+    settle()
+    # An edit that leaves the roommates alone is not a change for the hotel.
+    ra.admin_notes = 'note'
+    session.flush()
+    assert derive_sync_status(ra, export) == 'in_sync'
+
+    add_room_occupant(session, ra, mate.id)
+    assert derive_sync_status(ra, export) == 'pending_export'
+    settle()
+    remove_room_occupant(session, ra, mate.id)
+    assert derive_sync_status(ra, export) == 'pending_export'
+
+
+@pytest.mark.parametrize('fmt', ['csv', 'xlsx', 'json'])
+def test_catch_up_flags_rooms_that_differ_from_the_last_file(session, no_cherrypy_session, fmt):
+    import json
+
+    from uber.hotel.exports import booking_dict, flag_rooms_changed_since_export
+    from uber.models.hotel import room_assignment_occupant
+
+    hotel = make_hotel(session)
+    inv = make_inventory(session, hotel)
+    same, new_mate, new_email, already = rooms = [
+        make_assignment(session, make_attendee(session), inventory=inv, check_in=N[1], check_out=N[3],
+                        hotel_confirmation_number=f'H{i}') for i in range(4)]
+    session.execute(room_assignment_occupant.insert().values(
+        room_assignment_id=same.id, attendee_id=make_attendee(session).id))
+    session.flush()
+    session.expire_all()
+
+    if fmt == 'json':
+        name, kind = 'pull.json', 'application/json'
+        raw = json.dumps({'bookings': [booking_dict(ra, None) for ra in rooms]}, default=str).encode()
+    else:
+        _, name, kind, raw = render_booking_export(session, hotel.id, fmt)
+    export = store_export_file(session, hotel, raw, name, kind, source='admin', record_count=4)
+
+    # Changes of the kind that never moved last_modified_at.
+    session.execute(room_assignment_occupant.insert().values(
+        room_assignment_id=new_mate.id, attendee_id=make_attendee(session).id))
+    session.execute(room_assignment_occupant.insert().values(
+        room_assignment_id=already.id, attendee_id=make_attendee(session).id))
+    new_email.attendee.email = 'changed@example.com'
+    for ra in rooms:
+        ra.last_modified_at = export.exported_at - timedelta(hours=1)
+    already.last_modified_at = export.exported_at + timedelta(hours=1)
+    session.flush()
+    session.expire_all()
+
+    found = {ra.id: changed for ra, changed in flag_rooms_changed_since_export(session)}
+    assert found == {new_mate.id: ['guests'], new_email.id: ['email']}
+    assert new_mate.last_modified_at < export.exported_at   # a dry run
+
+    flag_rooms_changed_since_export(session, commit=True)
+    assert new_mate.last_modified_at > export.exported_at and new_email.last_modified_at > export.exported_at
+    assert same.last_modified_at < export.exported_at
+    assert flag_rooms_changed_since_export(session) == []
+
+
+def test_catch_up_unflags_rooms_only_the_hotel_changed(session, no_cherrypy_session):
+    from uber.hotel.exports import flag_rooms_changed_since_export, unflag_rooms_changed_by_hotel
+    from uber.models.hotel import room_assignment_occupant
+
+    hotel = make_hotel(session)
+    inv = make_inventory(session, hotel)
+    confirmed, cancelled, also_ours, ours_later, by_hand = rooms = [
+        make_assignment(session, make_attendee(session), inventory=inv, check_in=N[1], check_out=N[3],
+                        hotel_confirmation_number='OLD' if i == 1 else '') for i in range(5)]
+    _, name, kind, raw = render_booking_export(session, hotel.id, 'csv')
+    export = store_export_file(session, hotel, raw, name, kind, source='admin', record_count=5)
+    during, after = export.exported_at + timedelta(hours=1), export.exported_at + timedelta(hours=3)
+    session.add(HotelImportFile(hotel_id=hotel.id, filename='back.csv', filepath='/tmp/back.csv', source='portal',
+                                uploaded_at=during, applied_from=during - timedelta(seconds=5),
+                                applied_to=during + timedelta(seconds=5)))
+
+    # What the old code did: the upload's numbers stamped every room they landed on.
+    for ra in (confirmed, also_ours, ours_later, by_hand):
+        ra.hotel_confirmation_number = 'NEW'
+    cancelled.cancellation_confirmation_number = 'X1'
+    session.execute(room_assignment_occupant.insert().values(
+        room_assignment_id=also_ours.id, attendee_id=make_attendee(session).id))
+    ours_later.special_requests = 'Low floor'
+    session.flush()
+    for ra in rooms:
+        ra.last_modified_at = during
+    ours_later.last_modified_at = by_hand.last_modified_at = after
+    session.flush()
+    session.expire_all()
+
+    found = {ra.id: changed for ra, changed in unflag_rooms_changed_by_hotel(session)}
+    assert set(found) == {confirmed.id, cancelled.id}
+    assert found[confirmed.id] == ['hotel_confirmation_number']
+    assert 'cancellation_confirmation_number' in found[cancelled.id]
+    assert confirmed.last_modified_at == during   # a dry run
+
+    unflag_rooms_changed_by_hotel(session, commit=True)
+    assert confirmed.last_modified_at <= export.exported_at and cancelled.last_modified_at <= export.exported_at
+    assert {ra.last_modified_at for ra in (also_ours, ours_later, by_hand)} == {during, after}
+    # The other catch-up does not put the flag back.
+    assert flag_rooms_changed_since_export(session) == []
+
+
+def test_timeline_counts_only_changes_the_hotel_has_yet_to_see(session):
+    hotel = make_hotel(session)
+    inv = make_inventory(session, hotel)
+    notes, unflagged, roommates, edited = [
+        make_assignment(session, make_attendee(session), inventory=inv, check_in=N[1], check_out=N[3])
+        for _ in range(4)]
+    export = store_export_file(session, hotel, b'x', 'f.csv', 'text/csv', source='admin')
+    session.query(Tracking).filter(Tracking.fk_id.in_([ra.id for ra in (notes, unflagged, roommates, edited)])).delete(
+        synchronize_session=False)
+    when = export.exported_at + timedelta(hours=1)
+    later, earlier = 'datetime.datetime(2026, 1, 2, 3, 4, 6, tzinfo=<UTC>)', 'datetime.datetime(2026, 1, 2, 3, 4)'
+
+    # Not for the hotel: a field it never gets, its own upload, and the catch-up clearing a flag.
+    _track(session, notes, when, data="admin_notes=''' -> 'called''")
+    _track(session, notes, when, data="hotel_confirmation_number='None -> 'H1''")
+    _track(session, unflagged, when, data=f"last_modified_at='{later} -> {earlier}'")
+    # For the hotel: a roommate change is a stamp alone.
+    _track(session, roommates, when, data=f"last_modified_at='{earlier} -> {later}'")
+    _track(session, edited, when)
+
+    gap = hotel_activity_timeline(session, hotel.id)[0]
+    assert gap['kind'] == 'changes' and gap['count'] == 2
+    rows = changed_rooms_between(session, hotel.id, export.exported_at, None, exclude_imports=True)
+    assert {row['assignment_id']: [f for f, _, _ in row['changes']] for row in rows} == {
+        roommates.id: ['roommates or guest details'], edited.id: ['special_requests']}

@@ -13,16 +13,18 @@ class MenuItem:
     href = None     # link to render
     submenu = None  # submenu to show
     name = None     # name of Menu item to show
+    separator = False # Render an hr instead of a link
 
     def __init__(self, href=None, submenu=None, name=None,
-                 access_override=None, visibility_check=None):
-        assert submenu or href, "menu items must contain ONE nonempty: href or submenu"
-        assert not submenu or not href, "menu items must not contain both a href and submenu"
+                 access_override=None, visibility_check=None, separator=False):
+        assert submenu or href or separator, "Menu items must contain ONE nonempty: href, submenu, or separator flag"
+        assert not submenu or not href or not separator, "Menu items cannot use an href, submenu or separator flag together"
 
         if submenu:
             self.submenu = listify(submenu)
         else:
             self.href = href
+            self.separator = separator
 
         self.name = name
         self.access_override = access_override
@@ -80,6 +82,9 @@ class MenuItem:
         if self.visibility_check is not None:
             if resolved_href and not self.visibility_check():
                 return None
+        elif self.separator:
+            out['separator'] = True
+            return out
         else:
             page_path = self.access_override or resolved_href
             if resolved_href and not c.has_section_or_page_access(
@@ -130,9 +135,13 @@ c.MENU = MenuItem(name='Root', submenu=[
     MenuItem(name='Staffing', submenu=[
         MenuItem(name='Staffers', href='../shifts_admin/staffers'),
         MenuItem(name='Pending Staffers', href='../staffing_admin/pending_badges'),
+        MenuItem(name='Departments', href='../dept_admin/'),
+        MenuItem(separator=True),
         MenuItem(name='View/Edit Shift Schedule', href='../shifts_admin/'),
         MenuItem(name='Unfilled Shifts', href='../shifts_admin/unfilled_shifts'),
-        MenuItem(name='Departments', href='../dept_admin/'),
+        MenuItem(name='Shift Signups', href='../shifts_admin/signups'),
+        MenuItem(name='Shift Check-In/Check-Out', href='../shifts_admin/current'),
+        MenuItem(name='Mobile Shift Check-In', href='../shifts_admin/check_in_badge_num'),
     ]),
 
     MenuItem(name='Registration', submenu=[
@@ -162,7 +171,7 @@ c.MENU = MenuItem(name='Root', submenu=[
 
 
 if c.DEPT_CHECKLIST_OPEN or (c.DEPT_CHECKLIST_START and c.DEV_BOX):
-    c.MENU['Staffing'].append_menu_item(MenuItem(name='Department Checklists', href='../dept_checklist/overview'))
+    c.MENU['Staffing'].append_menu_item(MenuItem(name='Department Checklists', href='../dept_checklist/overview'), position=3)
 
 
 if c.GROUPS_ENABLED:
@@ -173,6 +182,11 @@ if c.GROUPS_ENABLED:
 if c.ATTENDEE_ACCOUNTS_ENABLED:
     c.MENU['Registration'].append_menu_item(MenuItem(name='Attendee Accounts',
                                                      href='../reg_admin/attendee_accounts'), position=1)
+
+
+if c.BADGE_WAITLIST_ENABLED:
+    c.MENU['Registration'].append_menu_item(MenuItem(name='Badge Waitlist Signups',
+                                                     href='../reg_admin/waitlist_signups'))
 
 
 if c.ADMIN_BADGES_NEED_APPROVAL:

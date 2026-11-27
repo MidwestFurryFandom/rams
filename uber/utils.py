@@ -746,6 +746,10 @@ def get_age_from_birthday(birthdate, today=None):
     if isinstance(today, six.string_types):
         today = Attendee.coerce_column_data(Attendee, birthdate_col, today)
 
+    if isinstance(birthdate, six.string_types) or isinstance(today, six.string_types):
+        log.error(f"get_age_from_birthday called with malformed birthdate ({birthdate}) or today ({today}) value")
+        return
+
     # int(True) == 1 and int(False) == 0
     upcoming_birthday = int(
         (today.month, today.day) < (birthdate.month, birthdate.day))
@@ -1384,7 +1388,7 @@ class Order:
         return ('-' + field) if field == self.order else field
 
     def __str__(self):
-        return self.order
+        return '&order='.join(listify(self.order))
 
 class RegistrationCode():
     """
@@ -1605,7 +1609,7 @@ def report_critical_exception(msg, subject="Critical Error"):
 
     # Also attempt to email the admins
     if c.SEND_EMAILS and not c.DEV_BOX:
-        with Session() as session:
+        with Session(independent=True) as session:
             EmailService.queue_email(session, 'critical_exception_admin', to=c.ADMIN_EMAIL, sender=c.ADMIN_EMAIL,
                                      subject=subject, body=msg + f'\n{traceback.format_exc()}')
 
@@ -1862,7 +1866,7 @@ class ExcelWorksheetStreamWriter:
 
 
 class SignNowRequest:
-    def __init__(self, session, model=None, ident='', create_if_none=False):
+    def __init__(self, session, model=None, ident='terms_and_conditions', create_if_none=False):
         self.model = model
         self.first_name, self.last_name = '', ''
         self.document = None
@@ -1874,7 +1878,7 @@ class SignNowRequest:
             log.error(self.error_message)
             return
 
-        from uber.models import Group, SignedDocument
+        from uber.models import Attendee, Group, SignedDocument
 
         if model:
             model_class = model.__class__.__name__
@@ -1885,6 +1889,9 @@ class SignNowRequest:
                 if isinstance(model, Group):
                     self.first_name = model.leader.first_name if model.leader else ''
                     self.last_name = model.leader.last_name if model.leader else ''
+                elif isinstance(model, Attendee):
+                    self.first_name = model.first_name
+                    self.last_name = model.last_name
                 else:
                     self.first_name = model.attendee.first_name if model.attendee else ''
                     self.last_name = model.attendee.last_name if model.attendee else ''
@@ -2139,7 +2146,7 @@ class TaskUtils:
         from uber.models import Attendee, AttendeeAccount, DeptMembership, DeptRole
         from functools import partial
 
-        with uber.models.Session() as session:
+        with uber.models.Session(independent=True) as session:
             service, message, target_url = get_api_service_from_server(import_job.target_server,
                                                                        import_job.api_token)
 
@@ -2310,7 +2317,7 @@ class TaskUtils:
     def attendee_account_import(import_job):
         from uber.models import Attendee, AttendeeAccount, BadgeInfo
 
-        with uber.models.Session() as session:
+        with uber.models.Session(independent=True) as session:
             service, message, target_url = get_api_service_from_server(import_job.target_server,
                                                                        import_job.api_token)
 
@@ -2403,7 +2410,7 @@ class TaskUtils:
 
         from uber.models import AttendeeAccount, Group
 
-        with uber.models.Session() as session:
+        with uber.models.Session(independent=True) as session:
             service, message, target_url = get_api_service_from_server(import_job.target_server,
                                                                        import_job.api_token)
 

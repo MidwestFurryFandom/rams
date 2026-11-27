@@ -30,7 +30,8 @@ writes live in uber.hotel.service / uber.hotel.waitlist.
 from collections import defaultdict
 from datetime import timedelta
 
-from sqlalchemy import func, or_
+from sqlalchemy import exists, func, or_
+from sqlalchemy.orm import aliased
 
 from uber.config import c
 from uber.models import Attendee
@@ -50,25 +51,36 @@ def shared_room_eligible_query(session):
     return staff_rooming_query(session).filter(Attendee.hotel_eligible.is_(True))
 
 
-def attendee_name_filter(term):
+def attendee_name_filter(term, attendee=Attendee):
     """OR clause matching `term` against an attendee's first, last, and
     full name (badge and hotel variants) and email. The query must
-    already include Attendee."""
+    already include `attendee` (Attendee or an alias of it)."""
     like = f'%{term}%'
     return or_(
-        Attendee.first_name.ilike(like),
-        Attendee.last_name.ilike(like),
-        func.concat(Attendee.first_name, ' ', Attendee.last_name).ilike(like),
-        Attendee.hotel_first_name.ilike(like),
-        Attendee.hotel_last_name.ilike(like),
-        func.concat(Attendee.hotel_first_name, ' ', Attendee.hotel_last_name).ilike(like),
-        Attendee.email.ilike(like),
+        attendee.first_name.ilike(like),
+        attendee.last_name.ilike(like),
+        func.concat(attendee.first_name, ' ', attendee.last_name).ilike(like),
+        attendee.hotel_first_name.ilike(like),
+        attendee.hotel_last_name.ilike(like),
+        func.concat(attendee.hotel_first_name, ' ', attendee.hotel_last_name).ilike(like),
+        attendee.email.ilike(like),
     )
+
+
+def roommate_name_filter(term):
+    """Clause matching `term` against anyone in a room's occupants list."""
+    from uber.models.hotel import room_assignment_occupant as occupant
+
+    roommate = aliased(Attendee)
+    return exists().where(occupant.c.room_assignment_id == RoomAssignment.id,
+                          occupant.c.attendee_id == roommate.id,
+                          attendee_name_filter(term, roommate))
 
 
 def build_room_assignment_query(session, *, status='live', hotel_id='',
                                 partition_id='', search='', attendee_id='',
-                                badge_types=None):
+                                badge_types=None, search_roommates=False,
+                                include_roommate_rooms=False):
     """Build the standard RoomAssignment listing query.
 
     Filter semantics (mirrors the hotel_lottery_admin Rooms page):
@@ -93,6 +105,11 @@ def build_room_assignment_query(session, *, status='live', hotel_id='',
                     Attendee and requires the booker's badge_type to be
                     in the list (staff_rooming passes
                     [c.STAFF_BADGE, c.CONTRACTOR_BADGE]).
+      search_roommates - also match `search` against roommates' names
+                    and emails, not just the booker's.
+
+      include_roommate_rooms - with attendee_id, also return rooms the
+                    attendee is an occupant of without being the booker.
 
     Ordering is left to the caller. Additional caller-specific filters
     (e.g. staffer_rooms' billing filter) can be chained onto the returned
@@ -104,7 +121,12 @@ def build_room_assignment_query(session, *, status='live', hotel_id='',
     # Scope to one attendee's rooms - show every status in that case,
     # since the admin wants the attendee's full history.
     if attendee_id:
-        q = q.filter(RoomAssignment.attendee_id == attendee_id)
+        mine = RoomAssignment.attendee_id == attendee_id
+        if include_roommate_rooms:
+            from uber.models.hotel import room_assignment_occupant as occupant
+            mine = or_(mine, exists().where(occupant.c.room_assignment_id == RoomAssignment.id,
+                                            occupant.c.attendee_id == attendee_id))
+        q = q.filter(mine)
         if status == 'live':
             status = 'all'
 
@@ -150,11 +172,12 @@ def build_room_assignment_query(session, *, status='live', hotel_id='',
             q = q.join(Attendee,
                        Attendee.id == RoomAssignment.attendee_id,
                        isouter=True)
-        q = q.filter(or_(
-            LotteryApplication.confirmation_num.ilike(like),
-            RoomAssignment.hotel_confirmation_number.ilike(like),
-            attendee_name_filter(search_term),
-        ))
+        matches = [LotteryApplication.confirmation_num.ilike(like),
+                   RoomAssignment.hotel_confirmation_number.ilike(like),
+                   attendee_name_filter(search_term)]
+        if search_roommates:
+            matches.append(roommate_name_filter(search_term))
+        q = q.filter(or_(*matches))
 
     return q
 
@@ -172,7 +195,7 @@ def occupant_stay_dates(session, assignment_ids):
     return dates
 
 
-def attendee_search_results(session, q, limit=25):
+def attendee_search_results(session, q, limit=25, filters=()):
     """JSON-ready rows for the admin attendee-picker widgets
     (`attendee_search_widget` + static/js/hotel-attendee-search.js).
 
@@ -181,14 +204,15 @@ def attendee_search_results(session, q, limit=25):
     promo group, etc.) works here too. Returns a list of dicts with
     exactly the keys the picker JS expects: id, name, email, badge_num,
     badge_type. Access control is the caller's job - both consuming
-    routes keep their own gates.
+    routes keep their own gates. `filters` are extra Attendee clauses.
+    Badges that cannot hold a hotel room are never listed.
     """
     q = (q or '').strip()
     if len(q) < 2:
         return []
 
     try:
-        results, _ = session.search(q)
+        results, _ = session.search(q, Attendee.can_hold_hotel_room, *filters)
     except Exception:
         return []
 

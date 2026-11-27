@@ -116,10 +116,10 @@ class Root:
             return "Payments marked complete for payment intent ID " + payment_intent['id']
 
     @any_admin_access
-    def send_signnow_link(self, session, id, cls="Group", return_to='../group_admin/form'):
+    def send_signnow_link(self, session, id, cls="Group", ident='terms_and_conditions', return_to='../group_admin/form'):
         model = session.get(Session.resolve_model(cls), id)
 
-        signnow_request = SignNowRequest(session=session, model=model, create_if_none=True)
+        signnow_request = SignNowRequest(session=session, model=model, ident=ident, create_if_none=True)
         signnow_request.send_signing_invite_email()
         if signnow_request.error_message:
             raise HTTPRedirect(return_to + "?id={}&message={}", id,
@@ -130,10 +130,10 @@ class Root:
             raise HTTPRedirect("{}?id={}&message={}", return_to, id, "SignNow link sent!")
 
     @requires_account()
-    def download_signnow_document(self, session, id, cls="Group", return_to='../preregistration/group_members'):
+    def download_signnow_document(self, session, id, cls="Group", ident='', return_to='../preregistration/group_members'):
         model = session.get(Session.resolve_model(cls), id)
 
-        signnow_request = SignNowRequest(session=session, model=model)
+        signnow_request = SignNowRequest(session=session, model=model, ident=ident)
         if signnow_request.error_message:
             raise HTTPRedirect(return_to + "?id={}&message={}", id,
                                "We're having an issue fetching this document link. Please try again later!")

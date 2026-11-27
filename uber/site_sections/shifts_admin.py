@@ -1,9 +1,10 @@
 from collections import defaultdict
 from datetime import datetime, timedelta, time
+from dateutil import parser as dateparser
 
 import cherrypy
 import logging
-from sqlalchemy import select, func, literal
+from sqlalchemy import select, func, literal, or_, and_
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import selectinload, joinedload, defaultload
 
@@ -12,7 +13,7 @@ from uber.decorators import ajax, all_renderable, csrf_protected, csv_file, \
     check_can_edit_dept, requires_shifts_admin, site_mappable
 from uber.errors import HTTPRedirect
 from uber.forms import load_forms
-from uber.models import Attendee, Department, DeptRole, Job, JobTemplate
+from uber.models import Attendee, BadgeInfo, Department, DeptRole, Job, JobTemplate, Shift
 from uber.utils import check, localized_now, redirect_to_allowed_dept, validate_model, date_trunc_day
 
 log = logging.getLogger(__name__)
@@ -31,6 +32,8 @@ def job_dict(job, shifts=None):
         'timespan': job.timespan(),
         'department_id': job.department_id,
         'department_name': job.department_name,
+        'start_time': job.start_time,
+        'end_time': job.end_time,
         'shifts': [{
             'id': shift.id,
             'rating': shift.rating,
@@ -39,7 +42,11 @@ def job_dict(job, shifts=None):
             'worked_label': shift.worked_label,
             'attendee_id': shift.attendee.id,
             'attendee_name': shift.attendee.full_name,
-            'attendee_badge': shift.attendee.badge_num
+            'attendee_badge': shift.attendee.badge_num,
+            'checked_in': shift.checked_in,
+            'checked_out': shift.checked_out,
+            'checked_in_str': shift.checked_in_local.strftime('%A %-I:%M %p') if shift.checked_in else '',
+            'checked_out_str': shift.checked_out_local.strftime('%A %-I:%M %p') if shift.checked_out else '',
         } for shift in job.shifts]
     }
 
@@ -283,6 +290,168 @@ class Root:
             'message': message,
         }
 
+    @requires_shifts_admin
+    def current(self, session, department_id=None, view_day=None, view_time=None, message=''):
+        redirect_to_allowed_dept(session, department_id, 'current')
+
+        if department_id == 'None':
+            department_id = ''
+        elif department_id == 'All':
+            department_id = None
+
+        cherrypy.session['prev_department_id'] = department_id
+
+        jobs = []
+        job_dicts = []
+        on_shift = set()
+        jobs_by_name = defaultdict(list)
+        now = localized_now()
+        view_dt = None
+
+        if view_day or view_time:
+            day = datetime.strptime(view_day, '%Y%m%d').date() if view_day else now.date()
+            time = datetime.strptime(view_time, '%H').time() if view_time else now.time()
+            ref_dt = c.EVENT_TIMEZONE.localize(datetime.combine(day, time))
+            view_dt = ref_dt
+        else:
+            if now < c.SHIFTS_EPOCH:
+                ref_dt = c.SHIFTS_EPOCH
+                view_dt = c.SHIFTS_EPOCH
+            else:
+                ref_dt = now
+
+        if department_id != '':
+            job_filters = [Job.department_id == department_id] if department_id else []
+
+            # Currently active jobs and jobs starting in the next hour
+            job_filters.append(or_(and_(Job.start_time <= ref_dt, Job.end_time > ref_dt),
+                                   and_(Job.start_time > ref_dt, Job.start_time < ref_dt + timedelta(hours=1))))
+
+            jobs = session.jobs().filter(*job_filters)
+
+        for job in jobs:
+            # TODO: Optimize by using the job dict for building the other views
+            job_dicts.append(job_dict(job))
+            on_shift.update([(shift.attendee, shift, shift.job) for shift in job.shifts])
+            jobs_by_name[job.name].extend([shift for shift in job.shifts])
+
+        return {
+            'message': message,
+            'department_id': 'All' if department_id is None else department_id,
+            'view_dt': view_dt,
+            'attendees': session.staffers_for_dropdown(department_id),
+            'jobs': job_dicts,
+            'on_shift': on_shift,
+            'jobs_by_name': jobs_by_name,
+        }
+
+    @ajax
+    def get_current_shift(self, session, badge_num):
+        if not badge_num.isdigit():
+            return {'success': False, 'message': "Invalid badge number."}
+
+        attendee = session.query(Attendee).join(Attendee.active_badge).filter(BadgeInfo.ident == badge_num).first()
+        if not attendee:
+            return {'success': False, 'message': f'No attendee has badge number {badge_num}.'}
+        if not attendee.has_badge:
+            return {'success': False, 'message': f'{attendee.full_name}\'s badge is currently \
+                    {attendee.badge_status_label} and cannot sign up for shifts.'}
+        if not attendee.shifts:
+            return {'success': False, 'message': f'{attendee.full_name} does not have any shifts.'}
+
+        current_shift = session.query(Shift).filter(Shift.attendee_id == attendee.id).join(
+            Shift.job).filter(Job.start_time < localized_now() + timedelta(minutes=30), Job.end_time > localized_now()).options(
+                joinedload(Shift.job)).first()
+        if not current_shift:
+            # Fallback to any 'open' shifts so we can check people out, even if it's late
+            current_shift = session.query(Shift).filter(Shift.checked_in != None, Shift.checked_out == None).first()
+
+        if not current_shift:
+            return {'success': False, 'message': f'{attendee.full_name} does not have any shifts currently active or starting in the next 30 minutes.'}
+
+        return {'success': True, 'result': {
+            'shift_id': current_shift.id,
+            'department': current_shift.job.department_name,
+            'attendee_name': attendee.full_name,
+            'badge_num': badge_num,
+            'shift_name': current_shift.job.name,
+            'shift_timespan': current_shift.job.timespan(),
+            'checked_in': current_shift.checked_in_local.strftime('%A %-I:%M %p'),
+        }}
+
+    @ajax
+    def check_in_shift(self, session, id):
+        shift = session.get(Shift, id, options=[joinedload(Shift.attendee), joinedload(Shift.job)])
+        if not shift:
+            return {'success': False, 'message': f"Shift {id} not found."}
+
+        if not c.DEV_BOX:
+            # Check that it makes sense to check this shift in now
+            # Late check-ins are allowed as long as the shift is or was recently active, on the assumption that
+            # the staffer arrived on time and the check-in process is just being done late
+            if shift.job.start_time > localized_now() + timedelta(hours=1):
+                return {'success': False, 'message': "This shift does not start for at least another hour."}
+            if shift.job.end_time < localized_now() + timedelta(minutes=15):
+                return {'success': False, 'message': "This shift ended over 15 minutes ago."}
+
+        if shift.checked_in:
+            return {'success': False, 'message': f"{shift.attendee.full_name} has already been checked in for this shift."}
+
+        shift.checked_in = localized_now()
+        session.add(shift)
+        session.commit()
+        return {'success': True, 'message': f"{shift.attendee.full_name} is now checked in for their {shift.job.name} \
+                shift at {shift.job.start_time_local.strftime('%-I:%M %p')}.",
+                'new_status': f"Checked In {shift.checked_in_local.strftime("%-I:%M %p")}"}
+
+    @ajax
+    def check_out_shift(self, session, id):
+        shift = session.get(Shift, id, options=[joinedload(Shift.attendee), joinedload(Shift.job)])
+        if not shift:
+            return {'success': False, 'message': f"Shift {id} not found."}
+
+        if not shift.checked_in:
+            return {'success': False, 'message': f"{attendee.full_name} is not checked in for this shift."}
+
+        if shift.checked_out:
+            return {'success': False, 'message': f"{shift.attendee.full_name} has already been checked out for this shift."}
+
+        shift.checked_out = localized_now()
+        session.add(shift)
+        session.commit()
+        return {'success': True, 'message': f"{shift.attendee.full_name} is now checked out of their \
+                {shift.job.start_time_local.strftime('%-I:%M %p')} {shift.job.name} shift.",
+                'new_status': f"Checked Out {shift.checked_out_local.strftime("%-I:%M %p")}"}
+
+    @ajax
+    def undo_check_in_out(self, session, id, undo_action='check_in'):
+        shift = session.get(Shift, id, options=[joinedload(Shift.attendee)])
+        if not shift:
+            return {'success': False, 'message': f"Shift {id} not found."}
+
+        if undo_action == 'check_in':
+            if shift.checked_out:
+                return {'success': False, 'message': f'{shift.attendee.full_name} is already checked out. Please undo their check-out first.'}
+            shift.checked_in = None
+            session.add(shift)
+            session.commit()
+            return {'success': True, 'message': f'{shift.attendee.full_name} successfully un-checked-in.',
+                    'new_status': f"Not Checked In"}
+
+        if undo_action == 'check_out':
+            shift.checked_out = None
+            session.add(shift)
+            session.commit()
+            return {'success': True, 'message': f'{shift.attendee.full_name} successfully un-checked-out.',
+                    'new_status': f"Checked In {shift.checked_in_local.strftime("%A %-I:%M %p")}"}
+
+        return {'success': False, 'message': f"Undo action not specified or invalid."}
+
+    def check_in_badge_num(self, session, message=''):
+        return {
+            'message': message
+        }
+
     def goto_volunteer_checklist(self, id):
         raise HTTPRedirect('../staffing/index?id={}', id)
 
@@ -297,20 +466,66 @@ class Root:
         return {'success': True, 'message': 'Non-shift hours and admin notes updated'}
 
     @ajax
-    def assign_shift(self, session, staffer_id, job_id):
+    def assign_shift(self, session, staffer_id, job_id, badge_num=None):
+        if not staffer_id and badge_num:
+            if not badge_num.isdigit():
+                return {'success': False, 'message': "Invalid badge number."}
+    
+            attendee = session.query(Attendee).join(Attendee.active_badge).filter(BadgeInfo.ident == badge_num).first()
+            if not attendee:
+                return {'success': False, 'message': f'No attendee has badge number {badge_num}.'}
+            staffer_id = attendee.id
+
         message = session.assign(staffer_id, job_id)
         if message:
             return {'success': False, 'message': message}
         else:
             session.commit()
-            return {'success': True, 'message': 'Shift added'}
+            shift = session.query(Shift).filter(Shift.attendee_id == staffer_id, Shift.job_id == job_id).options(
+                joinedload(Shift.job), joinedload(Shift.attendee).joinedload(Attendee.active_badge)
+            ).first()
+            log.error(shift.job.slots_taken)
+            return {
+                'success': True,
+                'message': f'{shift.attendee.full_name} is now signed up for the \
+                    {shift.job.timespan()} {shift.job.name} shift.',
+                'shift_info': {
+                    'shift_id': shift.id,
+                    'job_id': shift.job.id,
+                    'department_name': shift.job.department_name,
+                    'attendee_full_name': shift.attendee.full_name,
+                    'attendee_badge_printed_name': shift.attendee.badge_printed_name,
+                    'attendee_badge_num': shift.attendee.badge_num,
+                    'job_name': shift.job.name,
+                    'job_start_time': shift.job.start_time_local.strftime('%A %-I:%M %p'),
+                    'job_end_time': shift.job.end_time_local.strftime('%A %-I:%M %p'),
+                    'job_timespan': shift.job.timespan(),
+                    'slots_taken': shift.job.slots_taken,
+                    'slots_left': 1 if not shift.job.slots else shift.job.slots_untaken,
+                    'has_slots': shift.job.slots != 0,
+                }}
 
     @ajax
-    def unassign_shift(self, session, shift_id):
-        shift = session.shift(shift_id)
+    def unassign_shift(self, session, id):
+        shift = session.get(Shift, id, options=[joinedload(Shift.attendee), joinedload(Shift.job)])
+        attendee = shift.attendee
+        job = shift.job
         session.delete(shift)
         session.commit()
-        return {'success': True, 'message': 'Staffer unassigned from shift'}
+        return {
+            'success': True,
+            'message': f'{attendee.full_name} successfully unassigned from the {job.timespan()} {job.name} shift.',
+            'job_info': {
+                'has_slots': job.slots != 0,
+                'slots_taken': job.slots_taken,
+                'slots_left': job.slots_untaken,
+                'job_id': job.id,
+                'department_name': job.department_name,
+                'job_name': job.name,
+                'job_start_time': job.start_time_local.strftime('%A %-I:%M %p'),
+                'job_end_time': job.end_time_local.strftime('%A %-I:%M %p'),
+                'job_timespan': job.timespan(),
+            }}
 
     @requires_shifts_admin
     def form(self, session, message='', **params):

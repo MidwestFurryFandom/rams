@@ -18,8 +18,22 @@ from uber.utils import get_age_conf_from_birthday
 
 
 __all__ = ['AdminBadgeExtras', 'AdminBadgeFlags', 'AdminConsents', 'AdminStaffingInfo', 'BadgeExtras',
-           'BadgeFlags', 'BadgeAdminNotes', 'PersonalInfo', 'PreregOtherInfo', 'OtherInfo', 'StaffingInfo',
+           'BadgeFlags', 'BadgeAdminNotes', 'BadgeWaitlistInfo', 'PersonalInfo', 'PreregOtherInfo', 'OtherInfo', 'StaffingInfo',
            'Consents', 'CheckInForm', 'DietaryRestrictions']
+
+
+class BadgeWaitlistInfo(MagForm):
+    first_name = StringField('First Name', render_kw={'autocomplete': "fname"})
+    last_name = StringField('Last Name', render_kw={'autocomplete': "lname"})
+    same_legal_name = BooleanField('The above name is exactly what appears on my Legal Photo ID.')
+    legal_name = StringField('Name as appears on Legal Photo ID',
+                                render_kw={'placeholder': 'First and last name exactly as they appear on Photo ID'})
+    email = EmailField('Email Address', render_kw={'placeholder': 'test@example.com'})
+    confirm_email = EmailField('Confirm Email Address')
+    birthdate = StringField('Date of Birth', widget=DateMaskInput())
+    offer_without_adult = BooleanField(
+        f'I\'m okay with purchasing this badge even if no adult badges are available.',
+        description="If checked, this badge will be come up on the waitlist even if there are no adult badges avalable. Avoiding purchasing it will make it lose its place in line.")
 
 
 class PersonalInfo(AddressForm):
@@ -52,9 +66,13 @@ class PersonalInfo(AddressForm):
     def get_non_admin_locked_fields(self, attendee):
         locked_fields = []
 
+        # Badges from the waitlist have these fields locked even if they're pending or placeholder
+        if attendee.waitlist_signup:
+            locked_fields.extend(['first_name', 'last_name', 'legal_name', 'same_legal_name', 'birthdate'])
+
         if attendee.is_new or attendee.badge_status == c.PENDING_STATUS or attendee.paid == c.PENDING:
             return locked_fields
-        elif not attendee.is_valid or attendee.badge_status == c.REFUNDED_STATUS:
+        elif not attendee.is_valid or attendee.badge_status == c.REFUNDED_STATUS or attendee.locked_by_waitlist:
             return list(self._fields.keys())
 
         if attendee.valid_placeholder or attendee.unassigned_group_reg:
@@ -160,6 +178,7 @@ class AdminStaffingInfo(StaffingInfo):
     dynamic_choices_fields = StaffingInfo.dynamic_choices_fields
     dynamic_choices_fields['assigned_depts_ids'] = lambda: c.DEPARTMENT_OPTS
 
+    needs_volunteer_doc = BooleanField('Send this person a SignNow volunteer agreement document.')
     assigned_depts_ids = SelectMultipleField('Assigned Departments', widget=MultiCheckbox())
     walk_on_volunteer = BooleanField('This person signed up to volunteer at the event.')
     got_staff_merch = BooleanField('This staffer has picked up their merch.')
@@ -249,7 +268,7 @@ class AdminBadgeFlags(BadgeFlags):
 
     create_account = BooleanField('Create an account and send this person an email to claim their badge.',
                                   description="If checked, this takes effect immediately on badge creation.")
-    can_transfer = BooleanField('Make this attendee\'s badge always transferable.')
+    transferable = SelectField('Badge Transferability', coerce=int, choices=c.BADGE_TRANSFER_OPTS)
     transfer_code = StringField('Transfer Code')
     badge_status = SelectField('Badge Status', coerce=int, choices=c.BADGE_STATUS_OPTS)
     badge_type = SelectField('Badge Type', coerce=int, choices=c.BADGE_OPTS)
@@ -263,10 +282,12 @@ class AdminBadgeFlags(BadgeFlags):
 
     def get_valid_groups():
         from uber.models import Group
+        status_labels = Group.get_field('status').type.choices
         with Session() as session:
-            groups_list = [(g.id, g.name + (f" ({g.status_label})" if g.is_dealer else ""))
-                           for g in session.query(Group).filter(Group.status != c.IMPORTED).order_by(Group.name).all()]
-            return [('', "No Group")] + groups_list
+            groups = session.query(Group.id, Group.name, Group.is_dealer, Group.status).filter(
+                Group.status != c.IMPORTED).order_by(Group.name).all()
+        return [('', "No Group")] + [(group_id, name + (f" ({status_labels.get(status, '')})" if is_dealer else ""))
+                                     for group_id, name, is_dealer, status in groups]
 
 
 class BadgeAdminNotes(MagForm):

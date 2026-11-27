@@ -38,7 +38,6 @@
             {% if c.HAS_SECURITY_ADMIN_ACCESS %}
             <a href="../security_admin/watchlist_form?attendee_id={{ attendee.id }}" class="btn btn-warning">Add to Watchlist</a>
             {% endif %}
-
             {% if attendee.active_badge and not c.BADGE_PRINTING_ENABLED %}
                 <form method="post" action="lost_badge">
                     <input type="hidden" name="id" value="{{ attendee.id }}" />
@@ -48,6 +47,26 @@
         {% endif %}
         </div>
     </div>
+    {% if c.SIGNNOW_VOLUNTEER_TEMPLATE_ID and attendee.needs_volunteer_doc %}
+    <div class="d-flex gap-1 justify-content-end mt-3">
+    {% if volunteer_signnow_signed %}
+        <div class="text-end">
+        <em>This person signed their volunteer onboarding document on {{ volunteer_signnow_signed|datetime_local }}.</em>
+        </div>
+    {% elif volunteer_signnow_last_emailed %}
+        <div>
+        <em>This person was last emailed their volunteer onboarding document at {{ volunteer_signnow_last_emailed|datetime_local }}.</em>
+        <a class="btn btn-warning" href="../services/send_signnow_link?id={{ attendee.id }}&cls=Attendee&ident=volunteer_onboarding&return_to=../registration/form">Resend SignNow Link</a>
+        </div>
+    {% elif c.SIGNNOW_VOLUNTEER_TEMPLATE_ID and attendee.needs_volunteer_doc %}
+        <div class="text-end">
+        <em>This applicant has not been emailed a volunteer onboarding document yet.</em>
+        <a class="btn btn-success" href="../services/send_signnow_link?id={{ attendee.id }}&cls=Attendee&ident=volunteer_onboarding&return_to=../registration/form">Email SignNow Link</a>
+        {% if volunteer_signnow_link %}<br/>OR copy this link for them: <code style="user-select: all;">{{ volunteer_signnow_link }}{% endif %}</code>
+        </div>
+    {% endif %}
+    </div>
+    {% endif %}
 </div>
 
 <div class="card">
