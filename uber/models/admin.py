@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 import cherrypy
+import logging
 from pytz import UTC
 from sqlalchemy import Sequence, Uuid, String, DateTime
 from sqlalchemy.dialects.postgresql.json import JSONB
@@ -16,6 +17,7 @@ from uber.models.types import (default_relationship as relationship, utcnow,
 from uber.models import MagModel
 from uber.utils import listify
 
+log = logging.getLogger(__name__)
 
 __all__ = ['AccessGroup', 'AdminAccount', 'EscalationTicket', 'PasswordReset', 'WatchList', 'WorkstationAssignment']
 
@@ -94,20 +96,23 @@ class AdminAccount(MagModel, table=True):
             return None
         
     @staticmethod
-    def admin_or_volunteer_name():
+    def admin_or_volunteer_name(session=None):
+        from uber.models import Session
         try:
-            from uber.models import Session
-            with Session() as session:
-                admin = session.admin_attendee()
-                volunteer = session.kiosk_operator_attendee()
-                if volunteer and not admin:
-                    return volunteer.full_name + " (Volunteer)"
-                elif not admin:
-                    return session.current_supervisor_admin().attendee.full_name
-                else:
-                    return admin.full_name
-        except Exception:
+            session = session or Session()
+            admin = session.admin_attendee()
+            volunteer = session.kiosk_operator_attendee()
+            if volunteer and not admin:
+                return volunteer.full_name + " (Volunteer)"
+            elif not admin:
+                return session.current_supervisor_admin().attendee.full_name
+            else:
+                return admin.full_name
+        except Exception as e:
+            log.error(f"Error fetch admin or volunteer name: {e}")
             return None
+        finally:
+            session.close()
         
     @staticmethod
     def acting_name():

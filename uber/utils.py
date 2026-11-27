@@ -304,6 +304,14 @@ def redirect_with_params(base, **params):
     return url.replace('{', '{{').replace('}', '}}')
 
 
+def get_origin_ip():
+    # Discards any proxy IPs included in X-Forwarded-For to return just the origin IP
+    ip_address = cherrypy.request.headers.get('X-Forwarded-For', cherrypy.request.remote.ip)
+    if ip_address:
+        ip_list = ip_address.split(',')
+        return ip_list[0]
+
+
 def normalize_phone(phone_number, country='US'):
     return phonenumbers.format_number(
         phonenumbers.parse(phone_number, country),

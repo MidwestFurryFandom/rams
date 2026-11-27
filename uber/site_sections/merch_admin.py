@@ -5,7 +5,7 @@ from sqlalchemy import or_
 from uber.config import c
 from uber.decorators import ajax, all_renderable, credit_card, public, kiosk_login, site_mappable
 from uber.errors import HTTPRedirect
-from uber.models import ArbitraryCharge, Attendee, BadgeInfo, MerchDiscount, MerchPickup, \
+from uber.models import AccessTracking, ArbitraryCharge, Attendee, BadgeInfo, MerchDiscount, MerchPickup, \
     MPointsForCash, NoShirt, OldMPointExchange
 from uber.utils import check, check_csrf, listify
 from uber.payments import TransactionRequest
@@ -58,8 +58,10 @@ class Root:
                 cherrypy.session.pop('account_id', None)
                 cherrypy.session.pop('attendee_account_id', None)
         elif params.get('volunteer_logout'):
+            AccessTracking.track_logout(session)
             cherrypy.session.pop('kiosk_operator_id', None)
         elif params.get('exit_kiosk'):
+            AccessTracking.track_logout(session)
             cherrypy.session.pop('kiosk_supervisor_id', None)
             cherrypy.session.pop('kiosk_operator_id', None)
             raise HTTPRedirect('index?message={}', "Kiosk mode ended.")
@@ -93,6 +95,8 @@ class Root:
             return {'success': False, 'message': message}
 
         cherrypy.session['kiosk_operator_id'] = attendee.id
+        AccessTracking.track_login(session, login_type=c.KIOSK)
+
         return {'success': True,
                 'message': f"Logged in as {attendee.name_and_badge_info}!",
                 'operator_name': attendee.full_name,

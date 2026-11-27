@@ -481,11 +481,13 @@ def _stamp_entry_started(application):
     """Stamp entry_started and capture the request metadata the first
     time an application is touched. Idempotent - an already-started
     entry keeps its original timestamp and metadata."""
+    from uber.utils import get_origin_ip
+
     if application.entry_started:
         return
     application.entry_started = datetime.now()
     application.entry_metadata = {
-        'ip_address': cherrypy.request.headers.get('X-Forwarded-For', cherrypy.request.remote.ip),
+        'ip_address': get_origin_ip(),
         'user_agent': cherrypy.request.headers.get('User-Agent', ''),
         'referer': cherrypy.request.headers.get('Referer', '')}
 

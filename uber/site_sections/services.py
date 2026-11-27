@@ -13,7 +13,7 @@ import base64
 from uber.config import c
 from uber.decorators import any_admin_access, ajax, all_renderable, not_site_mappable, requires_account
 from uber.errors import HTTPRedirect
-from uber.models import AdminAccount, AttendeeAccount, Session
+from uber.models import AccessTracking, AdminAccount, AttendeeAccount, Session
 from uber.model_checks import mivs_show_info_required_fields
 from uber.utils import check, filename_extension, SignNowRequest
 from uber.files import FileService
@@ -72,6 +72,7 @@ class Root:
             login_account = session.get(AdminAccount, admin_account_id)
             login_account.last_signed_in = now
             session.add(login_account)
+            AccessTracking.track_login(session)
         if attendee_account_id:
             login_account = session.get(AttendeeAccount, attendee_account_id)
             login_account.last_signed_in = now

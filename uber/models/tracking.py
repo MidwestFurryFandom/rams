@@ -28,8 +28,47 @@ from uber.models.types import Choice, DefaultColumn as Column, MultiChoice, utcn
 
 log = logging.getLogger(__name__)
 
-__all__ = ['PageViewTracking', 'ReportTracking', 'Tracking', 'TxnRequestTracking']
+__all__ = ['AccessTracking', 'PageViewTracking', 'ReportTracking', 'Tracking', 'TxnRequestTracking']
 
+
+class AccessTracking(MagModel, table=True):
+    when: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
+    access_type: int = Field(sa_column=Column(Choice(c.ACCESS_TYPE_OPTS)))
+    who: str = ''
+    supervisor: str = ''
+    ip_address: str = ''
+    logged_in: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
+    logged_out: datetime | None = Field(sa_type=DateTime(timezone=True), nullable=True)
+
+    @property
+    def who_repr(self):
+        if self.supervisor:
+            return Markup(f'{self.who};<br/>{self.supervisor} (Supervisor)')
+        return self.who
+
+    @classmethod
+    def track_login(cls, session, login_type=c.ADMIN):
+        from uber.utils import get_origin_ip
+
+        session.add(AccessTracking(who=AdminAccount.admin_or_volunteer_name(session),
+                                    access_type=login_type,
+                                    supervisor=AdminAccount.supervisor_name() or '',
+                                    ip_address=get_origin_ip(),
+                                    logged_in=datetime.now(UTC),
+                                    ))
+        session.commit()
+
+    @classmethod
+    def track_logout(cls, session):
+        who = AdminAccount.admin_or_volunteer_name(session)
+        last_login = session.query(AccessTracking).filter(
+            AccessTracking.who == who).order_by(AccessTracking.logged_in.desc()).first()
+        if not last_login or last_login.logged_out != None:
+            log.error(f"Tried to track {who} logging out, but there was no valid login tracking entry.")
+        else:
+            last_login.logged_out = datetime.now(UTC)
+            session.add(last_login)
+            session.commit()
 
 class ReportTracking(MagModel, table=True):
     when: datetime = Field(sa_type=DateTime(timezone=True), default_factory=lambda: datetime.now(UTC))
@@ -48,7 +87,7 @@ class ReportTracking(MagModel, table=True):
     def track_report(cls, params):
         from uber.models import Session
         with Session() as session:
-            session.add(ReportTracking(who=AdminAccount.admin_or_volunteer_name(),
+            session.add(ReportTracking(who=AdminAccount.admin_or_volunteer_name(session),
                                        supervisor=AdminAccount.supervisor_name() or '',
                                        page=c.PAGE_PATH,
                                        params={key: val for key, val in params.items()
@@ -102,7 +141,7 @@ class PageViewTracking(MagModel, table=True):
                     return
 
             session.add(PageViewTracking(
-                who=AdminAccount.admin_or_volunteer_name(),
+                who=AdminAccount.admin_or_volunteer_name(session),
                 supervisor=AdminAccount.supervisor_name() or '',
                 page=c.PAGE_PATH, which=which))
             session.commit()
@@ -354,4 +393,4 @@ class TxnRequestTracking(MagModel, table=True):
                                self.internal_error)
 
 
-Tracking.UNTRACKED = [Tracking, Email, PageViewTracking, ReportTracking, TxnRequestTracking]
+Tracking.UNTRACKED = [Tracking, Email, AccessTracking, PageViewTracking, ReportTracking, TxnRequestTracking]

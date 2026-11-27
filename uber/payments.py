@@ -608,6 +608,7 @@ class AuthNetRequestMixin:
 
     def send_authorizenet_txn(self, session, txn_type=c.AUTHCAPTURE, **params):
         # TODO: We should probably split this out quite a bit, it's a mess
+        from uber.utils import get_origin_ip
 
         payment_profile = None
         order = None
@@ -665,7 +666,7 @@ class AuthNetRequestMixin:
             transaction.order = order
 
         transaction.transactionType = c.AUTHNET_TXN_TYPES[txn_type]
-        transaction.customerIP = cherrypy.request.headers.get('X-Forwarded-For', cherrypy.request.remote.ip)
+        transaction.customerIP = get_origin_ip()
 
         if self.amount:
             transaction.amount = self.dollar_amount
@@ -1990,6 +1991,7 @@ class ReceiptManager:
                     session.delete(badge_pickup_group)
                     session.commit()
 
+            # TODO: These notifications are reporting the total, not what was just paid
             if model and isinstance(model, Group) and model.is_dealer and not txn.receipt.open_purchase_items:
                 EmailService.queue_email(session, 'dealer_payment_admin', to=c.MARKETPLACE_NOTIFICATIONS_EMAIL,
                                          data={'group': model, 'amount_paid_repr': model.amount_paid_repr})

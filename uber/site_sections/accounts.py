@@ -13,7 +13,7 @@ from uber.config import c
 from uber.decorators import (ajax, all_renderable, any_admin_access, csrf_protected, csv_file,
                              not_site_mappable, render, site_mappable, public)
 from uber.errors import HTTPRedirect
-from uber.models import AdminAccount, Attendee, BadgeInfo, PasswordReset, WorkstationAssignment
+from uber.models import AccessTracking, AdminAccount, Attendee, BadgeInfo, PasswordReset, WorkstationAssignment
 from uber.payments import PreregCart
 from uber.utils import (check, check_csrf, create_valid_user_supplied_redirect_url, ensure_csrf_token_exists, genpasswd,
                         create_new_hash)
@@ -265,7 +265,7 @@ class Root:
             }
 
     @public
-    def logout(self, delete_prereg=False, **params):
+    def logout(self, session, delete_prereg=False, **params):
         id_token = ""
         if "session_token" in cherrypy.request.cookie:
             id_token = cherrypy.request.cookie['session_token'].value
@@ -274,6 +274,10 @@ class Root:
             cherrypy.response.cookie[cookie]['expires'] = 0
             cherrypy.response.cookie[cookie]['max-age'] = 0 # Also set max-age for compatibility
             cherrypy.response.cookie[cookie]['path'] = '/'
+
+        if cherrypy.session.get('account_id', getattr(cherrypy.request, 'admin_account', None)):
+            AccessTracking.track_logout(session)
+
         for key in list(cherrypy.session.keys()):
             if key not in ['job_defaults', 'prev_location']:
                 if delete_prereg or key not in PreregCart.session_keys:

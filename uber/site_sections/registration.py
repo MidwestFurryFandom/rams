@@ -26,10 +26,9 @@ from uber.decorators import ajax, ajax_gettable, any_admin_access, all_renderabl
     requires_account, site_mappable, public
 from uber.errors import HTTPRedirect
 from uber.forms import load_forms
-from uber.models import (Attendee, AttendeeAccount, AdminAccount, BadgeInfo, Email, EscalationTicket, Group, Job, PageViewTracking,
-                         TxnRequestTracking, PasswordReset,
-                         PrintJob, PromoCode, PromoCodeGroup, ReportTracking, Sale, Session, Shift, Tracking, ReceiptTransaction,
-                         WorkstationAssignment)
+from uber.models import (AccessTracking, Attendee, AttendeeAccount, AdminAccount, BadgeInfo, Email, EscalationTicket, Group, Job,
+                         PageViewTracking, TxnRequestTracking, PasswordReset, PrintJob, PromoCode, PromoCodeGroup, ReportTracking,
+                         Sale, Session, Shift, Tracking, ReceiptTransaction, WorkstationAssignment)
 from uber.site_sections.preregistration import check_if_can_reg
 from uber.utils import add_opt, check, check_pii_consent, get_page, hour_day_format, \
     localized_now, Order, validate_model, normalize_email_legacy, SignNowRequest
@@ -1499,6 +1498,8 @@ class Root:
             model = ReportTracking
         elif tracking_type == 'pageview':
             model = PageViewTracking
+        elif tracking_type == 'access':
+            model = AccessTracking
         elif tracking_type == 'action':
             model = Tracking
 
@@ -1509,8 +1510,9 @@ class Root:
             feed = feed.filter_by(who=who)
         if what:
             like = '%' + what + '%'  # SQLAlchemy 2.0 introduces icontains
-            or_filters = [model.page.ilike(like)]
-            if tracking_type != 'report':
+            if tracking_type != 'access':
+                or_filters = [model.page.ilike(like)]
+            if tracking_type not in ['access', 'report']:
                 or_filters.append(model.which.ilike(like))
             if tracking_type == 'action':
                 or_filters.append(model.data.ilike(like))

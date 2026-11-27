@@ -1,5 +1,6 @@
 import cherrypy
 import logging
+import pytz
 
 from sqlalchemy.orm.exc import NoResultFound
 
@@ -13,11 +14,12 @@ from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.settings import OneLogin_Saml2_Settings
 from onelogin.saml2.utils import OneLogin_Saml2_Utils
 from urllib.parse import urlparse
+from datetime import datetime
 
 from uber.config import c
 from uber.decorators import all_renderable, not_site_mappable
 from uber.errors import HTTPRedirect
-from uber.models import Attendee, AccessGroup
+from uber.models import Attendee, AccessGroup, AccessTracking
 from uber.utils import prepare_saml_request, normalize_email_legacy
 
 log = logging.getLogger(__name__)
@@ -30,6 +32,7 @@ class Root:
         req = prepare_saml_request(cherrypy.request)
         auth = OneLogin_Saml2_Auth(req, c.SAML_SETTINGS)
         auth.process_response()
+        now = datetime.now(pytz.UTC)
 
         assertion_id = auth.get_last_assertion_id()
 
@@ -74,7 +77,9 @@ class Root:
                         session.commit()
                 if admin_account:
                     cherrypy.session['account_id'] = admin_account.id
-
+                    admin_account.last_signed_in = now
+                    session.add(admin_account)
+                    AccessTracking.track_login(session)
                 try:
                     account = session.get_attendee_account_by_email(account_email)
                 except NoResultFound:
@@ -88,6 +93,8 @@ class Root:
                         message = "We could not find any registrations matching the email {}.".format(account_email)
 
                 if account:
+                    account.last_signed_in = now
+                    session.add(account)
                     cherrypy.session['attendee_account_id'] = account.id
 
                 if not admin_account and not account:
