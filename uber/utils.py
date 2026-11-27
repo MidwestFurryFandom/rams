@@ -1866,7 +1866,7 @@ class ExcelWorksheetStreamWriter:
 
 
 class SignNowRequest:
-    def __init__(self, session, model=None, ident='', create_if_none=False):
+    def __init__(self, session, model=None, ident='terms_and_conditions', create_if_none=False):
         self.model = model
         self.first_name, self.last_name = '', ''
         self.document = None
@@ -1878,7 +1878,7 @@ class SignNowRequest:
             log.error(self.error_message)
             return
 
-        from uber.models import Group, SignedDocument
+        from uber.models import Attendee, Group, SignedDocument
 
         if model:
             model_class = model.__class__.__name__
@@ -1889,6 +1889,9 @@ class SignNowRequest:
                 if isinstance(model, Group):
                     self.first_name = model.leader.first_name if model.leader else ''
                     self.last_name = model.leader.last_name if model.leader else ''
+                elif isinstance(model, Attendee):
+                    self.first_name = model.first_name
+                    self.last_name = model.last_name
                 else:
                     self.first_name = model.attendee.first_name if model.attendee else ''
                     self.last_name = model.attendee.last_name if model.attendee else ''

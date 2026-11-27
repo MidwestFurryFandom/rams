@@ -12,10 +12,15 @@
         {% endif %}
     {% endif %}
 {% endset %}
-    <div class="col-12">
+    <div class="col-sm">
         <div class="form-text">Volunteering/Staffing</div>
         {{ form_macros.input(staffing_info.staffing, admin_text=staffing_admin_text, **{'x-model.boolean':'staffing'}) }}
     </div>
+    {% if c.SIGNNOW_VOLUNTEER_TEMPLATE_ID %}
+    <div class="col-sm">
+        {{ form_macros.input(staffing_info.needs_volunteer_doc) }}
+    </div>
+    {% endif %}
 </div>
 <div class="row g-3 mb-3" x-show="staffing">
     <div class="col-sm">

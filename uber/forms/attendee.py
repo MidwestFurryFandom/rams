@@ -178,6 +178,7 @@ class AdminStaffingInfo(StaffingInfo):
     dynamic_choices_fields = StaffingInfo.dynamic_choices_fields
     dynamic_choices_fields['assigned_depts_ids'] = lambda: c.DEPARTMENT_OPTS
 
+    needs_volunteer_doc = BooleanField('Send this person a SignNow volunteer agreement document.')
     assigned_depts_ids = SelectMultipleField('Assigned Departments', widget=MultiCheckbox())
     walk_on_volunteer = BooleanField('This person signed up to volunteer at the event.')
     got_staff_merch = BooleanField('This staffer has picked up their merch.')

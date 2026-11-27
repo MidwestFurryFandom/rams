@@ -494,6 +494,13 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
 
     badge_printed_name: str = ''
 
+    needs_volunteer_doc: bool = False
+    volunteer_onboarding_doc: 'SignedDocument' = Relationship(sa_relationship=relationship(
+            'SignedDocument',
+            primaryjoin='and_(SignedDocument.fk_id == foreign(Attendee.id),'
+            'SignedDocument.model == "Attendee", SignedDocument.ident == "volunteer_onboarding")',
+            overlaps="active_receipt"))
+
     active_receipt: 'ModelReceipt' = Relationship(sa_relationship=relationship(
         'ModelReceipt',
         primaryjoin='and_(remote(ModelReceipt.owner_id) == foreign(Attendee.id),'
@@ -2164,6 +2171,61 @@ class Attendee(MagModel, TakesPaymentMixin, table=True):
     @property
     def active_escalation_tickets(self):
         return [ticket for ticket in self.escalation_tickets if ticket.resolved == None]
+
+    @property
+    def signnow_config(self):
+        return {
+            'template_id': c.SIGNNOW_VOLUNTEER_TEMPLATE_ID,
+            'folder_id': c.SIGNNOW_VOLUNTEER_FOLDER_ID,
+            'doc_title': f"MFF {c.EVENT_YEAR} Volunteer Agreement - {self.full_name}",
+            'redirect_link': f'/preregistration/confirm?id={self.id}'
+        }
+
+    @property
+    def signnow_email_invite(self):
+        return {
+            "to": [
+                {"email": self.email, "printed_name": f"{self.first_name} {self.last_name}",
+                 "role": "Marketplace", "order": 1}
+            ],
+            "from": email_only(c.VOLUNTEER_EMAIL),
+            "cc": [],
+            "subject": f"ACTION REQUIRED: {c.EVENT_NAME} Volunteer Agreement",
+            "message": (f"Please click the button below to review and sign the {c.EVENT_NAME} volunteer agreement. "
+                        "You MUST sign this in order to work as a volunteer."),
+            "redirect_uri": (c.REDIRECT_URL_BASE or c.URL_BASE) + self.signnow_config['redirect_link']
+        }
+
+    @property
+    def signnow_texts_list(self):
+        """
+        Returns a list of JSON representing uneditable texts fields to use for this group's document in SignNow.
+        """
+        page_number = 4
+        textFont = 'Arial'
+        textLineHeight = 12
+        textSize = 10
+
+        texts_config = [(self.badge_num, 122, 570), (self.id, 200, 748)]
+
+        texts = []
+
+        for field, x, y in texts_config:
+            texts.append({
+                "page_number": page_number,
+                "data":        field,
+                "x":           x,
+                "y":           y,
+                "font":        textFont,
+                "line_height": textLineHeight,
+                "size":        6 if field == self.id else textSize,
+            })
+
+        return texts
+
+    @property
+    def signnow_document_signed(self):
+        return bool(self.volunteer_onboarding_doc and self.volunteer_onboarding_doc.signed)
 
     @property
     def multiply_assigned(self):

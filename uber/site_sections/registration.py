@@ -32,7 +32,7 @@ from uber.models import (Attendee, AttendeeAccount, AdminAccount, BadgeInfo, Ema
                          WorkstationAssignment)
 from uber.site_sections.preregistration import check_if_can_reg
 from uber.utils import add_opt, check, check_pii_consent, get_page, hour_day_format, \
-    localized_now, Order, validate_model, normalize_email_legacy
+    localized_now, Order, validate_model, normalize_email_legacy, SignNowRequest
 from uber.payments import TransactionRequest, ReceiptManager, SpinTerminalRequest
 
 log = logging.getLogger(__name__)
@@ -46,6 +46,35 @@ def check_atd(func):
         else:
             raise HTTPRedirect('index')
     return checking_at_the_door
+
+
+def check_volunteering_doc(session, attendee):
+    volunteer_signnow_last_emailed = None
+    volunteer_signnow_signed = False
+    volunteer_signnow_link = None
+    if c.SIGNNOW_VOLUNTEER_TEMPLATE_ID and attendee.needs_volunteer_doc:
+        signnow_request = SignNowRequest(session=session, model=attendee)
+
+        if not signnow_request.error_message and signnow_request.document:
+            session.add(signnow_request.document)
+
+            volunteer_signnow_signed = signnow_request.document.signed
+            if not volunteer_signnow_signed:
+                volunteer_signnow_signed = signnow_request.get_doc_signed_timestamp()
+                if volunteer_signnow_signed:
+                    volunteer_signnow_signed = datetime.fromtimestamp(int(signnow_signed))
+                    signnow_request.document.signed = signnow_signed
+                    volunteer_signnow_link = ''
+                    signnow_request.document.link = volunteer_signnow_link
+
+            volunteer_signnow_last_emailed = signnow_request.document.last_emailed
+            volunteer_signnow_link = signnow_request.document.link
+            if not volunteer_signnow_link:
+                volunteer_signnow_link = signnow_request.create_signing_link()
+                if not signnow_request.error_message:
+                    signnow_request.document.link = volunteer_signnow_link
+            session.commit()
+    return volunteer_signnow_last_emailed, volunteer_signnow_signed, volunteer_signnow_link
 
 
 def load_attendee(session, params):
@@ -99,6 +128,12 @@ def save_attendee(session, attendee, params):
 
     if c.BADGE_PROMO_CODES_ENABLED and 'promo_code_code' in params:
         message = session.add_promo_code_to_attendee(attendee, params.get('promo_code_code'))
+
+    if c.SIGNNOW_VOLUNTEER_TEMPLATE_ID and attendee.needs_volunteer_doc:
+        signnow_request = SignNowRequest(session=session, model=attendee,
+                                         ident="volunteer_onboarding", create_if_none=True)
+        if not signnow_request.error_message and signnow_request.document and signnow_request.document.is_new:
+            session.add(signnow_request.document)
 
     return message
 
@@ -323,6 +358,9 @@ class Root:
                             message,
                             '{} {}'.format(attendee.first_name, attendee.last_name
                                            ) if c.AT_THE_CON or c.BADGE_PICKUP_ENABLED else '')
+
+        volunteer_signnow_last_emailed, volunteer_signnow_signed, volunteer_signnow_link = check_volunteering_doc(session, attendee)
+
         receipt = session.get_receipt_by_model(attendee)
         session.commit()
         forms = load_forms(params, attendee, ['PersonalInfo', 'AdminBadgeExtras', 'AdminConsents', 'AdminStaffingInfo',
@@ -346,6 +384,9 @@ class Root:
             'reg_station_id': reg_station_id,
             'workstation_assignment': workstation_assignment,
             'receipt': receipt,
+            'volunteer_signnow_last_emailed': volunteer_signnow_last_emailed,
+            'volunteer_signnow_signed': volunteer_signnow_signed,
+            'volunteer_signnow_link': volunteer_signnow_link,
         }  # noqa: E711
 
     @ajax
