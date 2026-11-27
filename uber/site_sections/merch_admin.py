@@ -31,7 +31,7 @@ def attendee_from_id_or_badge_num(session, badge_num_or_qr_code):
         if not attendee:
             message = f"No attendee found with ID {id}."
     elif not message:
-        attendee = session.query(Attendee).join(BadgeInfo).filter(BadgeInfo.ident == badge_num_or_qr_code).first()
+        attendee = session.query(Attendee).join(Attendee.active_badge).filter(BadgeInfo.ident == badge_num_or_qr_code).first()
         if not attendee:
             message = f'No attendee has badge number {badge_num_or_qr_code}.'
     

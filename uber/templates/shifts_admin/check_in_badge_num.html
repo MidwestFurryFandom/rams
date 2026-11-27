@@ -1,0 +1,112 @@
+{% extends "base.html" %}{% set admin_area=True %}
+{% block title %}Shift Check In{% endblock %}
+
+
+{% block content %}
+<script type="text/javascript">
+    $().ready(function() {
+        let loadShiftInfo = function(result) {
+            $('#shift-id').val(result.shift_id)
+            $('#shift-info').show();
+            $('#department').text(result.department);
+            $('#attendee-name').text(result.attendee_name);
+            $('#badge-num').text(result.badge_num);
+            $('#shift-name').text(result.shift_name);
+            $('#shift-timespan').text(result.shift_timespan);
+
+            let isCheckedIn = Boolean(result.checked_in ?? false);
+
+            $('#checked-in').toggle(isCheckedIn);
+            $('#checked-in-time').text(result.checked_in);
+
+            $('#check-in').toggle(!isCheckedIn);
+            $('#check-out').toggle(isCheckedIn);
+        }
+
+        $('#check-in-out').on('click', function() {
+            $('#shift-info').hide();
+
+            $.ajax({
+              method: 'POST',
+              url: 'get_current_shift',
+              dataType: 'json',
+              data: {
+                badge_num: $('#badge_num').val(),
+                csrf_token: csrf_token
+              },
+              success: function (json) {
+                hideMessageBox();
+                var message = json.message;
+                if (json.success) {
+                    $('#badge_num').val('');
+                    loadShiftInfo(json.result);
+                } else {
+                    showErrorMessage(message);
+                }
+              },
+              error: function () {
+                showErrorMessage('Unable to connect to server, please try again.');
+              }
+            });
+        })
+
+        let callCheckInOut = function(action) {
+            $.ajax({
+              method: 'POST',
+              url: action,
+              dataType: 'json',
+              data: {
+                id: $('#shift-id').val(),
+                csrf_token: csrf_token
+              },
+              success: function (json) {
+                hideMessageBox();
+                var message = json.message;
+                if (json.success) {
+                    $('#shift-info').hide();
+                    $("#message-alert").addClass("alert-info").show().children('span').html(message);
+                } else {
+                    showErrorMessage(message);
+                }
+              },
+              error: function () {
+                showErrorMessage('Unable to connect to server, please try again.');
+              }
+            });
+        }
+
+        $('#check-in').on('click', function() { callCheckInOut('check_in_shift') });
+        $('#check-out').on('click', function() { callCheckInOut('check_out_shift') });
+    })
+</script>
+{% include 'barcode_client.html' %}
+<h2>
+  <i class="fa fa-check"></i>
+  Shift Check-In/Out
+</h2>
+
+<div class="card card-body">
+    <div class="d-flex gap-1 mb-3 align-items-end">
+        <div>
+            <div class="form-text">Badge #</div>
+            <input type="text" id="badge_num" class="form-control" />
+        </div>
+        <button id="check-in-out" class="btn btn-primary">Search</button>
+    </div>
+    <div id="shift-info" style="display:none;">
+        <div><strong><span id="attendee-name"></span> (#<span id="badge-num"></span>)</strong></div>
+        <div><span id="shift-name"></span> (<span id="department"></span>)</div>
+        <span id="shift-timespan"></span>
+        <hr/>
+        <div id="checked-in" style="display:none;">
+            Checked In <span id="checked-in-time"></span>
+        </div>
+        <div class="mt-auto pt-3">
+            <input type="hidden" id="shift-id" />
+            <button id="check-in" class="btn btn-success">Check In</button>
+            <button id="check-out" class="btn btn-info">Check Out</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

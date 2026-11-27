@@ -218,6 +218,19 @@
         commentRow.data("rating", undefined);
     }
 
+    const renderShiftCheckInOut = function(shift) {
+        shift = typeof shift === 'string' ? SHIFTS[shift] : shift;
+
+        if (shift.checked_in_str) {
+            let checked_in = "Checked in " + shift.checked_in_str
+            if (shift.checked_out_str) {
+                return checked_in + ", checked out " + shift.checked_out_str
+            } else {
+                return checked_in + ", never checked out"
+            }
+        }
+    }
+
     const renderShiftStatus = function(shift, onUpdateShiftStatus) {
         shift = typeof shift === 'string' ? SHIFTS[shift] : shift;
         if (shift.worked === {{ c.SHIFT_UNMARKED }}) {
@@ -261,6 +274,7 @@
         setupShiftRatingClickHandler,
         renderShiftRating,
         renderShiftStatus,
+        renderShiftCheckInOut,
         renderCommentRow,
         commentSubmit
     };

@@ -1863,9 +1863,9 @@ class UberSession(sqlalchemy.orm.Session):
 
             return self.query(Job).filter_by(**job_filter) \
                 .options(
-                    subqueryload(Job.department),
-                    subqueryload(Job.required_roles),
-                    subqueryload(Job.shifts).subqueryload(Shift.attendee).subqueryload(Attendee.group)) \
+                    joinedload(Job.department),
+                    selectinload(Job.required_roles),
+                    selectinload(Job.shifts).joinedload(Shift.attendee).joinedload(Attendee.group)) \
                 .order_by(Job.start_time, Job.name)
 
         def staffers_for_dropdown(self, department_id=None):
@@ -2187,6 +2187,12 @@ class UberSession(sqlalchemy.orm.Session):
             assign an Attendee to a Job by creating a Shift
             :return: 'None' on success, error message on failure
             """
+            if not attendee_id:
+                return 'Please select an attendee to assign to this shift.'
+
+            if not job_id:
+                return 'No shift ID provided.'
+
             # populate_existing reloads job.shifts that this session may already hold, so the slot and
             # duplicate checks below count shifts committed by other requests.
             job = self.query(Job).filter(Job.id == job_id).populate_existing().one()

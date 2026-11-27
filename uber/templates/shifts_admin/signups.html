@@ -47,17 +47,20 @@ Please select a department above to view its signups.
 
 {% if attendees %}
   <div id="volunteers" class="position-sticky top-0 float-end card card-body">
-      <b>Assign someone to any of these positions</b> <br/>
+      <b>Assign someone to any of these positions</b>
       <select id="attendee" class="form-select">
           <option value="">Select a volunteer</option>
           {% for attendee in attendees %}
               <option value="{{ attendee.id }}">{{ attendee.full_name }}{% if attendee.badge_num %} (#{{ attendee.badge_num }}){% endif %} - {{ attendee.total_hours or 0 }} Hours</option>
           {% endfor %}
       </select>
+      <div class="form-text" style="width: 0px; min-width: 100%;">
+        The dropdown above shows volunteers assigned to {{ c.DEPARTMENTS[department_id] }}.
+        To assign volunteers outside of this department, use the <a href="unfilled_shifts?department_id={{ department_id }}">Unfilled Shifts</a> page.
+      </div>
   </div>
   <div class="clearfix d-xl-none"></div>
 {% endif %}
-
 <script type="text/javascript">
   {% if show_filled_shifts %}
   SHOW_FULL_JOBS = true;
@@ -68,7 +71,7 @@ Please select a department above to view its signups.
     replaceQueryParamInUrl('toggle_filter'); // prevent re-toggling filter on refresh
   });
   </script>
-<div id="jobs-container" class="mt-3">
+<div id="jobs-container" class="card card-body mt-3" style="max-width: 1048px;">
 {% include "shifts_admin/job_renderer.html" %}
 </div>
 {% endif %}

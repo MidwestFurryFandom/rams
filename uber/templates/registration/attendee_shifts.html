@@ -140,7 +140,7 @@
             <td class="text-end">
               <form method="post" action="../shifts_admin/unassign_shift">
                 {{ csrf_token() }}
-                <input type="hidden" name="shift_id" value="{{ shift.id }}" />
+                <input type="hidden" name="id" value="{{ shift.id }}" />
                 <input type="submit" value="Unassign" class="btn btn-sm btn-warning"/>
               </form>
             </td>

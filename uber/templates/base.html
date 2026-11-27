@@ -431,7 +431,9 @@
                     {% endif %}
                     {% block mainmenu_items %}
                     {% for menu_item in c.MENU_FILTERED_BY_ACCESS_LEVELS.submenu -%}
-                        {% if menu_item.href -%}
+                        {% if menu_item.separator %}
+                            <li>|</li>
+                        {% elif menu_item.href -%}
                             <li class="nav-item"><a class="nav-link" href="{{ menu_item.href }}">{{ menu_item.name }}</a></li>
                         {% elif menu_item.submenu -%}
                         <li class="nav-item dropdown">
@@ -441,8 +443,9 @@
                             <ul class="dropdown-menu" aria-labelledby="navbar-dropdown-{{ menu_item.name }}">
                                 {% for submenu_item in menu_item.submenu -%}
                                     <li>
-                                    {% if submenu_item.href -%}<a class="dropdown-item" href="{{ submenu_item.href }}">
-                                    {% else -%}<a class="disabled">{% endif -%}
+                                        {% if submenu_item.separator %}<hr class="dropdown-divider">
+                                        {% elif submenu_item.href -%}<a class="dropdown-item" href="{{ submenu_item.href }}">
+                                        {% else -%}<a class="disabled">{% endif -%}
                                         {{ submenu_item.name }}
                                     </a></li>
                                 {% endfor -%}

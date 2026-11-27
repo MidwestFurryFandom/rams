@@ -2262,6 +2262,7 @@ c.JOB_PAGE_OPTS = (
     ('index', 'Calendar View'),
     ('signups', 'Signups View'),
     ('staffers', 'Staffer Summary'),
+    ('current', 'Shift Check-In'),
 )
 c.WEIGHT_OPTS = (
     ('0.5', 'x0.5'),

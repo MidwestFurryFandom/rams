@@ -1,0 +1,510 @@
+{% extends "base.html" %}{% set admin_area=True %}
+{% block title %}Shifts{% endblock %}
+{% block content %}
+
+{% include "shifts_admin/main_menu.html" %}
+{% if department_id == '' %}
+Please select a department above to view its current shifts.
+{% else %}
+{% macro action_buttons(shift=None) %}
+    {% if not shift %}
+        {% set display = 'default-actions' %}
+    {% elif shift.checked_out %}
+        {% set display = 'checked-out-actions' %}
+    {% elif shift.checked_in %}
+        {% set display = 'checked-in-actions' %}
+    {% else %}
+        {% set display = 'default-actions' %}
+    {% endif %}
+    <input type="hidden" name="shift_id" value="{{ shift.id if shift else '' }}" />
+    <div class="checked-out-actions"{% if display != 'checked-out-actions' %} style="display:none;"{% endif %}>
+        <div class="d-flex gap-1">
+        <button class="btn btn-sm btn-warning undo-checkout">Undo Check Out</button>
+        </div>
+    </div>
+    <div class="checked-in-actions"{% if display != 'checked-in-actions' %} style="display:none;"{% endif %}>
+        <div class="d-flex gap-1">
+        <button class="btn btn-sm btn-info check-out">Check Out</button>
+        <button class="btn btn-sm btn-warning undo-checkin">Undo Check In</button>
+        </div>
+    </div>
+    <div class="default-actions"{% if display != 'default-actions' %} style="display:none;"{% endif %}>
+        <div class="d-flex gap-1">
+        <button class="btn btn-sm btn-primary check-in">Check In</button>
+        <button class="btn btn-sm btn-warning unassign">Unassign</button>
+        </div>
+    </div>
+{% endmacro %}
+
+<script type="text/javascript">
+    $(function() {
+        {% if c.REG_USES_BARCODES %}
+        $('body').barcodeField({
+          targetField: '#badge_num',
+          blurOnKeys: ['~', '\\'],
+          detectBadgeNum: true
+        });
+        {% endif %}
+
+        let onShiftTable = $('.on-shift-table').DataTable({
+            aLengthMenu: [
+                [25, 50, 100, 200, -1],
+                [25, 50, 100, 200, 'All']
+            ],
+            stateSave: true,
+            drawCallback: createDateTextEntries
+        });
+
+        let openShiftsTable = $('.open-shifts-table').DataTable({
+            aLengthMenu: [
+                [25, 50, 100, 200, -1],
+                [25, 50, 100, 200, 'All']
+            ],
+            stateSave: true,
+            drawCallback: createDateTextEntries
+        });
+
+        let updateShiftInfo = function (shiftId, state, newStatus='') {
+            // `state` matches the corresponding action buttons that should be shown or hidden
+            actionBtns = ['checked-out', 'checked-in', 'default'];
+            $.each(actionBtns, function(index, value) {
+                $('.shift-' + shiftId).find('.' + value + '-actions').toggle(value == state);
+            })
+            if (newStatus != '') {
+                $('.shift-' + shiftId).find('.checked-in-status').text(newStatus)
+            }
+        }
+
+        let addActionBtnHandlers = function (context) {
+            $('.check-in', context).on('click', function() { submitShiftAction('check_in_shift', 'checked-in', this) });
+            $('.undo-checkin', context).on('click', function() { submitShiftAction('undo_check_in_out', 'default', this, {'undo_action': 'check_in'}) });
+            $('.check-out', context).on('click', function() { submitShiftAction('check_out_shift', 'checked-out', this) });
+            $('.undo-checkout', context).on('click', function() { submitShiftAction('undo_check_in_out', 'checked-in', this, {'undo_action': 'check_out'}) });
+            $('.unassign', context).on('click', function() { unassignFromShift(this); });
+        }
+
+        let addShift = function (shiftInfo) {
+            // Append new row to the on-shift table
+            nameDisplay = shiftInfo.attendee_full_name;
+            if (shiftInfo.attendee_badge_printed_name) {
+                nameDisplay = `${shiftInfo.attendee_full_name} (${shiftInfo.attendee_badge_printed_name})`
+            }
+            let newOnShiftRow = $('<tr>');
+            newOnShiftRow.addClass(`shift-${shiftInfo.shift_id}`);
+            newOnShiftRow.append(`
+                {% if department_id == 'All' %}<td>${shiftInfo.department_name}</td>{% endif %}
+                <td>${nameDisplay}</td>
+                <td>${shiftInfo.attendee_badge_num}</td>
+                <td>${shiftInfo.job_name}</td>
+                <td>${shiftInfo.job_start_time}</td>
+                <td>${shiftInfo.job_end_time}</td>
+                <td class="checked-in-status">Not Checked In</td>
+                <td>{{ action_buttons() }}</td>
+            `)
+            $('[name=shift_id]', newOnShiftRow).val(shiftInfo.shift_id);
+
+            addActionBtnHandlers(newOnShiftRow);
+            onShiftTable.row.add(newOnShiftRow).draw();
+            
+            // Append to the two shift grids
+            newJobIdGrid = `
+            <div class="d-flex gap-2 align-items-center job-id-grid shift-${shiftInfo.shift_id}">
+                ${shiftInfo.attendee_full_name} (#${shiftInfo.attendee_badge_num})
+                {{ action_buttons() }}
+            </div>`
+            
+            if ($('#job-' + shiftInfo.job_id + ' .job-id-grid').length) {
+                $('#job-' + shiftInfo.job_id + ' .job-id-grid').last().after(newJobIdGrid);
+                $(`.job-id-grid.shift-${shiftInfo.shift_id}`).addClass('mt-1');
+            } else {
+                $('#job-' + shiftInfo.job_id + ' hr').first().after(newJobIdGrid);
+            }
+
+            newJobNameGrid = `
+            <div class="d-flex gap-2 align-items-center job-name-grid shift-${shiftInfo.shift_id}">
+                <span>{% if department_id == 'All' %}<strong>${shiftInfo.department_name}</strong>:{% endif %}
+                ${shiftInfo.attendee_full_name} (#${shiftInfo.attendee_badge_num})</span>
+                ${shiftInfo.job_timespan}
+                {{ action_buttons() }}
+            </div>`
+
+            if ($('#job-' + shiftInfo.job_name.replace(/\s+/g, '') + ' .job-name-grid').length) {
+                $('#job-' + shiftInfo.job_name.replace(/\s+/g, '') + ' .job-name-grid').last().after(newJobNameGrid);
+                $(`.job-name-grid.shift-${shiftInfo.shift_id}`).addClass('mt-1');
+            } else {
+                $('#job-' + shiftInfo.job_name.replace(/\s+/g, '') + ' hr').first().after(newJobNameGrid);
+            }
+
+            jobGridContext = $(`.shift-${shiftInfo.shift_id}`);
+            $('[name=shift_id]', jobGridContext).val(shiftInfo.shift_id);
+            addActionBtnHandlers(jobGridContext);
+            
+            // Finally, remove ways to assign the shift if there are no slots left
+            if (shiftInfo.slots_left < 1) {
+                openShiftsTable.row('.open-' + shiftInfo.job_id).remove().draw();
+                $('.assign').parents('span').hide();
+            } else if (shiftInfo.has_slots) {
+                $('.open-' + shiftInfo.job_id + ' .job-slots').text(shiftInfo.slots_left);
+                if ($('#job-slots-' + shiftInfo.job_id).length) {
+                    $('#job-slots-' + shiftInfo.job_id).text(shiftInfo.slots_taken);
+                }
+            }
+        }
+
+        let addJob = function(jobInfo, shiftId) {
+            // Add a new row to the open shifts table
+            let newOpenShiftRow = $('<tr>');
+            newOpenShiftRow.addClass(`open-${jobInfo.job_id}`);
+            newOpenShiftRow.append(`
+                {% if department_id == 'All' %}<td>${jobInfo.department_name}</td>{% endif %}
+                <td>${jobInfo.job_name}</td>
+                <td>${jobInfo.job_start_time}</td>
+                <td>${jobInfo.job_end_time}</td>
+                <td class="job-slots">1</td>
+                <td>
+                    <input type="hidden" name="job_id" value="${jobInfo.job_id}" />
+                    <button class="btn btn-sm btn-success assign">Assign</button>
+                </td>
+            `)
+
+            $('.assign', newOpenShiftRow).on('click', function() { assignToShift(this); });
+
+            openShiftsTable.row.add(newOpenShiftRow).draw();
+        }
+
+        let submitShiftAction = function(action, state, element, extraParams={}) {
+            let shiftId = $(element).parent().parent().siblings('[name=shift_id]').first().val();
+            params = {
+                  id: shiftId,
+                  csrf_token: csrf_token,
+                  ...extraParams
+              }
+            $.ajax({
+              method: 'POST',
+              url: action,
+              dataType: 'json',
+              data: params,
+              success: function (json) {
+                hideMessageBox();
+                var message = json.message;
+                if (json.success) {
+                    $("#message-alert").addClass("alert-info").show().children('span').html(message);
+                    updateShiftInfo(shiftId, state, json.new_status ?? '')
+                } else {
+                    showErrorMessage(message);
+                }
+              },
+              error: function () {
+                showErrorMessage('Unable to connect to server, please try again.');
+              }
+            });
+        }
+
+        let unassignFromShift = function(element) {
+            let shiftId = $(element).parent().parent().siblings('[name=shift_id]').first().val();
+
+            $.ajax({
+              method: 'POST',
+              url: 'unassign_shift',
+              dataType: 'json',
+              data: {
+                id: shiftId,
+                csrf_token: csrf_token,
+              },
+              success: function (json) {
+                hideMessageBox();
+                var message = json.message;
+                if (json.success) {
+                    $("#message-alert").addClass("alert-info").show().children('span').html(message);
+                    if (json.job_info.slots_left == 1) {
+                        addJob(json.job_info, shiftId);
+                        $('#job-' + json.job_info.job_id + ' .assign').parents('span').show();
+                    } else if (json.job_info.has_slots) {
+                        $('.open-' + json.job_info.job_id + ' .job-slots').text(json.job_info.slots_left)
+                        if ($('#job-slots-' + json.job_info.job_id).length) {
+                            $('#job-slots-' + json.job_info.job_id).text(json.job_info.slots_taken);
+                        }
+                        $('#job-' + json.job_info.job_id + ' .assign').parents('span').show();
+                    }
+                    // Remove the shift rows
+                    onShiftTable.row('.shift-' + shiftId).remove().draw();
+                    $('.shift-' + shiftId).remove();
+                } else {
+                    showErrorMessage(message);
+                }
+              },
+              error: function () {
+                showErrorMessage('Unable to connect to server, please try again.');
+              }
+            });
+        }
+
+        let assignToShift = function(element) {
+            let attendeeId = $('#attendee_id').val();
+            let badgeNum = $('#badge_num').val();
+            let jobId = $(element).siblings('[name=job_id]').first().val();
+
+            $.ajax({
+              method: 'POST',
+              url: 'assign_shift',
+              dataType: 'json',
+              data: {
+                staffer_id: attendeeId,
+                job_id: jobId,
+                badge_num: badgeNum,
+                csrf_token: csrf_token,
+              },
+              success: function (json) {
+                hideMessageBox();
+                var message = json.message;
+                if (json.success) {
+                    $("#message-alert").addClass("alert-info").show().children('span').html(message);
+                    addShift(json.shift_info);
+                } else {
+                    showErrorMessage(message);
+                }
+              },
+              error: function () {
+                showErrorMessage('Unable to connect to server, please try again.');
+              }
+            });
+        }
+
+        $('.check-in').on('click', function() { submitShiftAction('check_in_shift', 'checked-in', this) });
+        $('.undo-checkin').on('click', function() { submitShiftAction('undo_check_in_out', 'default', this, {'undo_action': 'check_in'}) });
+        $('.check-out').on('click', function() { submitShiftAction('check_out_shift', 'checked-out', this) });
+        $('.undo-checkout').on('click', function() { submitShiftAction('undo_check_in_out', 'checked-in', this, {'undo_action': 'check_out'}) });
+        $('.unassign').on('click', function() { unassignFromShift(this); });
+        $('.assign').on('click', function() { assignToShift(this); });
+    });
+</script>
+
+<div class="card card-body mt-3">
+    <p>
+        <a href="check_in_badge_num" target="_blank" class="btn btn-secondary">Mobile Check-In/Out <i class="fa fa-external-link"></i></a>
+    </p>
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
+        <form action="current" method="get">
+        <div class="d-flex gap-1 align-items-center">
+            <div>
+                Select a day and time to view: &nbsp;
+            </div>
+            <div>
+                <select name="view_day" class="form-select">
+                    {% if view_dt %}
+                    <option value="">Today</option>
+                    {% endif %}
+                    {% for dt, label in c.JOB_DAY_OPTS %}
+                        {% if dt == now_localized()|datetime("%Y%m%d") %}
+                        <option value="{{ dt }}"{% if not view_dt or view_dt|datetime("%Y%m%d") == dt|string %} selected="selected"{% endif %}>
+                            Today ({{ label }})
+                        </option>
+                        {% else %}
+                        <option value="{{ dt }}"{% if view_dt|datetime("%Y%m%d") == dt|string %} selected="selected"{% endif %}>
+                            {{ label }}
+                        </option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                {% set start_time = (view_dt or c.SHIFTS_EPOCH).replace(hour=0, minute=0, second=0) %}
+                <select name="view_time" class="form-select">
+                    {% if view_dt %}
+                    <option value="">Now</option>
+                    {% endif %}
+                    {% for hour in range(24) %}
+                    {% set current_time = start_time|timedelta(hours=hour) %}
+                    {% if not view_dt and current_time|datetime('%H%M') == now_localized()|datetime('%H%M') %}
+                        <option value="{{ current_time|datetime('%H') }}" selected="selected">
+                            Now ({{ current_time|datetime('%-I:%M%p') }})
+                        </option>
+                    {% else %}
+                        <option value="{{ current_time|datetime('%H') }}"{% if view_dt and view_dt|datetime("%H") == current_time|datetime('%H') %} selected="selected"{% endif %}>
+                            {{ current_time|datetime('%-I:%M%p') }}
+                        </option>
+                        {% if not view_dt and current_time|datetime('%H') == now_localized()|datetime('%H') %}
+                        <option value="" selected="selected">Now ({{ now_localized()|datetime("%-I:%M%p") }})</option>
+                        {% endif %}
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <input type="hidden" name="department_id" value="{{ department_id }}" />
+                <button class="btn btn-primary">Update Day/Time</button>
+            </div>
+        </div>
+        </form>
+        <div class="d-flex gap-1 align-items-center">
+            <div>
+                Assign by badge number: &nbsp;
+            </div>
+            <div>
+                <input type="text" class="form-control" id="badge_num" name="badge_num">
+            </div>
+            {% if attendees %}
+            <div>&nbsp;OR&nbsp;</div>
+            <div>
+            <select id="attendee_id" class="form-select">
+                <option value="">Select a volunteer</option>
+                {% for attendee in attendees %}
+                    <option value="{{ attendee.id }}">{{ attendee.full_name }}{% if attendee.badge_num %} (#{{ attendee.badge_num }}){% endif %} - {{ attendee.total_hours or 0 }} Hours</option>
+                {% endfor %}
+            </select>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <ul class="nav nav-tabs flex-grow-1" role="tablist">
+    <li class="nav-item" role="presentation">
+    <button class="nav-link" id="on-shift-tab" data-bs-toggle="tab" data-bs-target="#on-shift" type="button" role="tab" aria-controls="on-shift">
+        <i class="fa fa-user"></i>&nbsp;Staffers On Shift
+    </button>
+    </li>
+    <li class="nav-item" role="presentation">
+    <button class="nav-link" id="open-shifts-tab" data-bs-toggle="tab" data-bs-target="#open-shifts" type="button" role="tab" aria-controls="open-shifts">
+        <i class="fa fa-list"></i>&nbsp;Open Shifts
+    </button>
+    </li>
+    <li class="nav-item" role="presentation">
+    <button class="nav-link" id="shift-grid-tab" data-bs-toggle="tab" data-bs-target="#shift-grid" type="button" role="tab" aria-controls="shift-grid">
+        <i class="fa fa-calendar"></i>&nbsp;Shift Grid
+    </button>
+    </li>
+</ul>
+<div class="tab-content">
+    &nbsp;
+    <div role="tabpanel" class="tab-pane" id="on-shift" aria-labelledby="on-shift-tab">
+        <table class="table table-hover on-shift-table">
+            <thead>
+                <tr>
+                    {% if department_id == 'All' %}<th>Department</th>{% endif %}
+                    <th>Name</th>
+                    <th>Badge Number</th>
+                    <th>Job Title</th>
+                    <th>Start Time</th>
+                    <th>End Time</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for staffer, shift, job in on_shift %}
+                <tr class="shift-{{ shift.id }}">
+                    {% if department_id == 'All' %}<td>{{ job.department_name }}</td>{% endif %}
+                    <td>
+                        {{ staffer.full_name }}
+                        {% if staffer.badge_printed_name %} ({{ staffer.badge_printed_name }}){% endif %}
+                    </td>
+                    <td>{{ staffer.badge_num }}</td>
+                    <td>{{ job.name }}</td>
+                    <td>{{ job.start_time|datetime_local("%A %-I:%M %p") }}</td>
+                    <td>{{ job.end_time|datetime_local("%A %-I:%M %p") }}</td>
+                    <td class="checked-in-status">
+                        {% if shift.checked_out %}
+                        Checked Out {{ shift.checked_out|datetime_local("%-I:%M %p") }}
+                        {% elif shift.checked_in %}
+                        Checked In {{ shift.checked_in|datetime_local("%-I:%M %p") }}
+                        {% else %}
+                        Not Checked In
+                        {% endif %}
+                    </td>
+                    <td>{{ action_buttons(shift) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div role="tabpanel" class="tab-pane" id="open-shifts" aria-labelledby="open-shifts-tab">
+        <table class="table table-hover open-shifts-table">
+            <thead>
+                <tr>
+                    {% if department_id == 'All' %}<th>Department</th>{% endif %}
+                    <th>Job Title</th>
+                    <th>Start Time</th>
+                    <th>End Time</th>
+                    <th># Open Slots</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in jobs %}
+                {% if not job.slots or job.slots > job.shifts|length %}
+                <tr class="open-{{ job.id }}">
+                    {% if department_id == 'All' %}<td>{{ job.department_name }}</td>{% endif %}
+                    <td>{{ job.name }}</td>
+                    <td>{{ job.start_time|datetime_local("%-I:%M %p") }}</td>
+                    <td>{{ job.end_time|datetime_local("%-I:%M %p") }}</td>
+                    <td class="job-slots">{% if not job.slots %}Assignment Only{% else %}{{ job.slots - job.shifts|length }}{% endif %}</td>
+                    <td>
+                        <input type="hidden" name="job_id" value="{{ job.id }}" />
+                        <button class="btn btn-sm btn-success assign">Assign</button>
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div role="tabpanel" class="tab-pane" id="shift-grid" aria-labelledby="shift-grid-tab">
+        <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="by-shift-pill" data-bs-toggle="pill" data-bs-target="#by-shift" type="button" role="tab" aria-controls="by-shift-pill" aria-selected="true">Show Each Shift</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="by-name-pill" data-bs-toggle="pill" data-bs-target="#by-name" type="button" role="tab" aria-controls="by-name-pill">Group by Shift Name</button>
+        </li>
+        </ul>
+        <div class="tab-content" id="pills-tabContent">
+        <div class="tab-pane show active" id="by-shift" role="tabpanel" aria-labelledby="by-shift-tab">
+            <div class="d-flex gap-3 flex-wrap">
+            {% for job in jobs %}
+            <div class="card card-body" id="job-{{ job.id }}">
+                <span>
+                <strong>{{ job.name }}</strong>{% if job.slots %} (<span id="job-slots-{{ job.id }}">{{ job.shifts|length }}</span>/{{ job.slots }} slots taken){% endif %}
+                {% if department_id == 'All' %}<span class="pull-right">{{ job.department_name }}</span>{% endif %}
+                <br/>{{ job.timespan }}
+                </span>
+                <hr/>
+                {% for shift in job.shifts %}
+                <div class="d-flex gap-2 align-items-center job-id-grid shift-{{ shift.id }}{% if not loop.first %} mt-1{% endif %}">
+                {{ shift.attendee_name }} (#{{ shift.attendee_badge }}) 
+                {{ action_buttons(shift) }}
+                {% if not loop.last %}<br/>{% endif %}
+                </div>
+                {% endfor %}
+                <span class="mt-auto ms-auto"{% if job.slots and job.shifts|length >= job.slots %} style="display:none;"{% endif %}>
+                    <br/><input type="hidden" name="job_id" value="{{ job.id }}" />
+                    <button class="btn btn-sm btn-success assign">Assign</button>
+                </span>
+            </div>
+            {% endfor %}
+            </div>
+        </div>
+        <div class="tab-pane" id="by-name" role="tabpanel" aria-labelledby="by-name-tab">
+            <div class="d-flex gap-3 flex-wrap">
+            {% for name, shifts in jobs_by_name.items() %}
+            <div class="card card-body" id="job-{{ name|replace(' ','') }}">
+                <span>
+                    <strong>{{ name }}</strong>
+                </span>
+                <hr/>
+                {% for shift in shifts %}
+                <div class="d-flex gap-2 align-items-center job-name-grid shift-{{ shift.id }}{% if not loop.first %} mt-1{% endif %}">
+                    <span>{% if department_id == 'All' %}<strong>{{ shift.department_name }}</strong>:{% endif %}
+                    {{ shift.attendee.full_name }} (#{{ shift.attendee.badge_num }})</span>
+                    {{ shift.job.timespan() }}
+                    {{ action_buttons(shift) }}
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+            </div>
+        </div>
+        </div>
+    </div>
+</div>
+{{ "js/window-hash-tabload.js"|serve_static_content }}
+{% endif %}
+{% endblock %}

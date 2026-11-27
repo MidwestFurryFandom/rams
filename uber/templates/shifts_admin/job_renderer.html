@@ -78,7 +78,8 @@
                     }))
                 )
             .append($('<td></td>').append(RatingModule.renderShiftStatus(shift, renderShift)))
-            .append($('<td></td>').append(RatingModule.renderShiftRating(shift)));
+            .append($('<td></td>').append(RatingModule.renderShiftRating(shift)))
+            .append($('<td class="me-3"></td>').append(RatingModule.renderShiftCheckInOut(shift)));
 
         // Create comment row
         let commentRow = RatingModule.renderCommentRow(shift, 4);
