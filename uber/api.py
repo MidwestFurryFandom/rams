@@ -2130,7 +2130,7 @@ class PrintJobLookup:
                 if not restart or not errors:
                     results[job.id] = self._build_job_json_data(job)
                     if not dry_run:
-                        job.queued = datetime.now(UTC)
+                        job.queued = datetime.now(pytz.UTC)
                         session.add(job)
                         session.commit()
 
@@ -2224,7 +2224,7 @@ class PrintJobLookup:
 
             for job in jobs:
                 results[job.id] = self._build_job_json_data(job)
-                job.printed = datetime.now(UTC)
+                job.printed = datetime.now(pytz.UTC)
                 session.add(job)
                 session.commit()
 
@@ -2270,7 +2270,7 @@ class PrintJobLookup:
                     else:
                         job.errors = error
                 else:
-                    job.printed = datetime.now(UTC)
+                    job.printed = datetime.now(pytz.UTC)
                 session.add(job)
                 session.commit()
 
